@@ -325,7 +325,7 @@ func TestEngine_createIndexForReferenceTime(t *testing.T) {
 		t.Fatalf("nil index created for reference time %s", rt)
 	}
 
-	if idx.startTime != parseTime("1982-02-05T04:00:00Z") || idx.endTime != parseTime("1982-02-05T06:00:00Z") {
+	if !idx.startTime.Equal(parseTime("1982-02-05T04:00:00Z")) || !idx.endTime.Equal(parseTime("1982-02-05T06:00:00Z")) {
 		t.Fatalf("index created for reference time %s has wrong limits", rt)
 	}
 }
