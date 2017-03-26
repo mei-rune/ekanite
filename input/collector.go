@@ -34,7 +34,7 @@ type Collector interface {
 // TCPCollector represents a network collector that accepts and handler TCP connections.
 type TCPCollector struct {
 	iface  string
-	format string
+	parser *LogParser
 
 	addr      net.Addr
 	tlsConfig *tls.Config
@@ -44,15 +44,14 @@ type TCPCollector struct {
 type UDPCollector struct {
 	format string
 	addr   *net.UDPAddr
+	parser *LogParser
 }
 
 // NewCollector returns a network collector of the specified type, that will bind
 // to the given inteface on Start(). If config is non-nil, a secure Collector will
 // be returned. Secure Collectors require the protocol be TCP.
 func NewCollector(proto, iface, format string, tlsConfig *tls.Config) (Collector, error) {
-	// Verify that a parser can be instantiated. The actual parser that is used will
-	// be created by the connection handler.
-	_, err := NewParser(format)
+	parser, err := NewLogParser(format)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +120,7 @@ func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- *Event) {
 	reader := bufio.NewReader(conn)
 	var log string
 	var match bool
+	var address = conn.RemoteAddr().String()
 
 	for {
 		conn.SetReadDeadline(time.Now().Add(newlineTimeout))
@@ -145,13 +145,13 @@ func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- *Event) {
 		// Log line available?
 		if match {
 			stats.Add("tcpEventsRx", 1)
-			if parser.Parse(bytes.NewBufferString(log).Bytes()) {
+			if s.parser.Parse(address, bytes.NewBufferString(log).Bytes()) {
 				c <- &Event{
 					Text:          string(parser.Raw),
 					Parsed:        parser.Result,
 					ReceptionTime: time.Now().UTC(),
 					Sequence:      atomic.AddInt64(&sequenceNumber, 1),
-					SourceIP:      conn.RemoteAddr().String(),
+					SourceIP:      address,
 				}
 			}
 		}
@@ -183,14 +183,15 @@ func (s *UDPCollector) Start(c chan<- *Event) error {
 			if err != nil {
 				continue
 			}
+			address := addr.String()
 			log := strings.Trim(string(buf[:n]), "\r\n")
-			if parser.Parse(bytes.NewBufferString(log).Bytes()) {
+			if s.parser.Parse(address, bytes.NewBufferString(log).Bytes()) {
 				c <- &Event{
 					Text:          log,
 					Parsed:        parser.Result,
 					ReceptionTime: time.Now().UTC(),
 					Sequence:      atomic.AddInt64(&sequenceNumber, 1),
-					SourceIP:      addr.String(),
+					SourceIP:      address,
 				}
 			}
 			stats.Add("udpEventsRx", 1)
