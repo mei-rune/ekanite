@@ -6,11 +6,14 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/blevesearch/bleve"
 )
 
 // Searcher is the interface any object that perform searches should implement.
 type Searcher interface {
-	Search(query string) (<-chan string, error)
+	Query(startTime, endTime time.Time, req *bleve.SearchRequest, cb func(*bleve.SearchRequest, *SearchResult) error) error
 }
 
 // Server serves query client connections.
@@ -79,7 +82,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		s.Logger.Printf("executing query '%s'", query)
-		c, err := s.Searcher.Search(query)
+		c, err := SearchString(s.Logger, s.Searcher, query)
 		if err != nil {
 			conn.Write([]byte(err.Error()))
 		} else {

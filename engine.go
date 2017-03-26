@@ -402,7 +402,7 @@ func (e *Engine) Search(query string) (<-chan string, error) {
 	return c, nil
 }
 
-func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error {
+func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, cb func(*bleve.SearchRequest, *SearchResult) error) error {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
@@ -419,7 +419,7 @@ func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, c
 		}
 	}
 
-	result, err := bleve.MultiSearch(context.Background(), req, indexAlias...)
+	result, err := MultiSearch(context.Background(), req, indexAlias...)
 	if err != nil {
 		return err
 	}

@@ -508,15 +508,6 @@ func containsOrFail(t *testing.T, path, contents string) {
 	}
 }
 
-// parseTime parses the given string and returns a time.
-func parseTime(timestamp string) time.Time {
-	t, err := time.Parse(time.RFC3339, timestamp)
-	if err != nil {
-		panic(err.Error())
-	}
-	return t
-}
-
 func newInputEvent(Line string, refTime time.Time) *input.Event {
 	return &input.Event{
 		Text:          Line,
