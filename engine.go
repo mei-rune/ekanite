@@ -1,6 +1,7 @@
 package ekanite
 
 import (
+	"context"
 	"expvar"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blevesearch/bleve"
 	"github.com/ekanite/ekanite/input"
 )
 
@@ -255,6 +257,28 @@ func (e *Engine) indexForReferenceTime(t time.Time) *Index {
 	return nil
 }
 
+// getIndexs get all index with a given start and end time and it must be called under lock.
+func (e *Engine) getIndexs(startTime, endTime time.Time) []*Index {
+	var indexes []*Index
+	for _, idx := range e.indexes {
+		if startTime.Before(idx.startTime) { // idx.startTime < startTime
+			if endTime.After(idx.startTime) { // idx.endTime > startTime)
+				//  实际数据 -------s-----e--------
+				//  情况  1  ----s-----e-----------
+				//  情况  2  ----s--------------e--
+				indexes = append(indexes, idx)
+			}
+		} else if startTime.Before(idx.endTime) {
+			//  实际数据 --s-----e----
+			//  情况  1  ----s-----e--
+			//  情况  2  ----s-e------
+			indexes = append(indexes, idx)
+		}
+	}
+
+	return indexes
+}
+
 // createIndex creates an index with a given start and end time and adds the
 // created index to the Engine's store. It must be called under lock.
 func (e *Engine) createIndex(startTime, endTime time.Time) (*Index, error) {
@@ -376,6 +400,30 @@ func (e *Engine) Search(query string) (<-chan string, error) {
 	}()
 
 	return c, nil
+}
+
+func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	stats.Add("queriesRx", 1)
+
+	indexes := e.getIndexs(startTime, endTime)
+	if len(indexes) == 0 {
+		return bleve.ErrorAliasEmpty
+	}
+
+	var indexAlias = make([]bleve.Index, 0, len(indexes))
+	for _, idx := range indexes {
+		for _, shard := range idx.Shards {
+			indexAlias = append(indexAlias, shard.b)
+		}
+	}
+
+	result, err := bleve.MultiSearch(context.Background(), req, indexAlias...)
+	if err != nil {
+		return err
+	}
+	return cb(req, result)
 }
 
 // Path returns the path to the directory of indexed data.
