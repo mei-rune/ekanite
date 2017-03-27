@@ -29,7 +29,7 @@ var (
 )
 
 var (
-	fmtsByStandard = []string{"rfc5424", "rfc3164"}
+	fmtsByStandard = []string{"rfc5424", "rfc3164", "syslog"}
 )
 
 // ValidFormat returns if the given format matches one of the possible formats.
@@ -57,7 +57,8 @@ func NewLogParser(f string) (*LogParser, error) {
 		return nil, fmt.Errorf("%s is not a valid format", f)
 	}
 
-	p := &LogParser{}
+	formatByAddress := map[string]func() Parser{}
+	p := &LogParser{formatByAddress: formatByAddress}
 	p.detectFmt(strings.TrimSpace(strings.ToLower(f)))
 	//p.newRFC5424Parser()
 	return p, nil
