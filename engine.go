@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/blevesearch/bleve"
+	bleve_index "github.com/blevesearch/bleve/index"
 )
 
 // Engine defaults
@@ -36,6 +37,7 @@ type Searcher interface {
 	Query(startTime, endTime time.Time, req *bleve.SearchRequest,
 		cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error
 	Fields(startTime, endTime time.Time) ([]string, error)
+	FieldDict(startTime, endTime time.Time, field string) ([]bleve_index.DictEntry, error)
 }
 
 // EventIndexer is the interface a system than can index events must implement.
@@ -430,30 +432,31 @@ func (e *Engine) Fields(startTime, endTime time.Time) ([]string, error) {
 		return nil, bleve.ErrorAliasEmpty
 	}
 
-	var indexAlias = make([]bleve.Index, 0, len(indexes)*e.NumShards)
+	var indexAlias = 0
 	for _, idx := range indexes {
-		for _, shard := range idx.Shards {
-			indexAlias = append(indexAlias, shard.b)
-		}
+		indexAlias += len(idx.Shards)
 	}
 
 	var wait sync.WaitGroup
 	c := make(chan struct {
 		err    error
 		fields []string
-	}, len(indexAlias))
+	}, indexAlias)
 
-	wait.Add(len(indexAlias))
-	for idx := range indexAlias {
-		go func(idx int) {
-			defer wait.Done()
+	wait.Add(indexAlias)
 
-			fields, err := indexAlias[idx].Fields()
-			c <- struct {
-				err    error
-				fields []string
-			}{err: err, fields: fields}
-		}(idx)
+	for _, idx := range indexes {
+		for _, shard := range idx.Shards {
+			go func(shard *Shard) {
+				defer wait.Done()
+
+				fields, err := shard.b.Fields()
+				c <- struct {
+					err    error
+					fields []string
+				}{err: err, fields: fields}
+			}(shard)
+		}
 	}
 
 	wait.Wait()
@@ -483,6 +486,104 @@ func (e *Engine) Fields(startTime, endTime time.Time) ([]string, error) {
 		fields = append(fields, k)
 	}
 	return fields, nil
+}
+
+func (e *Engine) FieldDict(startTime, endTime time.Time, field string) ([]bleve_index.DictEntry, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	stats.Add("queriesRx", 1)
+
+	indexes := e.getIndexs(startTime, endTime)
+	if len(indexes) == 0 {
+		return nil, bleve.ErrorAliasEmpty
+	}
+
+	var indexAlias = 0
+	for _, idx := range indexes {
+		indexAlias += len(idx.Shards)
+	}
+
+	var wait sync.WaitGroup
+	c := make(chan struct {
+		err     error
+		entries []bleve_index.DictEntry
+	}, indexAlias)
+
+	wait.Add(indexAlias)
+
+	for _, idx := range indexes {
+		for _, shard := range idx.Shards {
+			go func(shard *Shard) {
+				defer wait.Done()
+
+				dict, err := shard.b.FieldDict(field)
+				if err != nil {
+					c <- struct {
+						err     error
+						entries []bleve_index.DictEntry
+					}{err: err}
+					return
+				}
+				defer dict.Close()
+
+				var entries []bleve_index.DictEntry
+				for {
+					entry, err := dict.Next()
+					if err != nil {
+						c <- struct {
+							err     error
+							entries []bleve_index.DictEntry
+						}{err: err}
+						return
+					}
+					if entry == nil {
+						break
+					}
+					entries = append(entries, *entry)
+				}
+
+				c <- struct {
+					err     error
+					entries []bleve_index.DictEntry
+				}{entries: entries}
+			}(shard)
+		}
+	}
+
+	wait.Wait()
+	close(c)
+
+	var allEntries = map[string]*bleve_index.DictEntry{}
+	var errList []error
+	for r := range c {
+		for _, entry := range r.entries {
+			if old := allEntries[entry.Term]; old == nil {
+				copyed := new(bleve_index.DictEntry)
+				*copyed = entry
+				allEntries[entry.Term] = copyed
+			} else {
+				old.Count += entry.Count
+			}
+		}
+
+		if r.err != nil {
+			errList = append(errList, r.err)
+		}
+	}
+	if len(errList) > 0 {
+		var buf bytes.Buffer
+		for _, err := range errList {
+			buf.WriteString(err.Error())
+			buf.WriteString("\n")
+		}
+		return nil, errors.New(buf.String())
+	}
+
+	entries := make([]bleve_index.DictEntry, 0, len(allEntries))
+	for _, v := range allEntries {
+		entries = append(entries, *v)
+	}
+	return entries, nil
 }
 
 // Search performs a search.

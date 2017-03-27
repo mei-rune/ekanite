@@ -108,20 +108,27 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.DefaultServeMux.ServeHTTP(w, r)
 		return
 	}
-	if strings.HasSuffix(r.URL.Path, "/fields") {
+	if r.URL.Path == "/fields" {
 		s.Fields(w, r)
 		return
 	}
-	//if isConsumeJSON(r) {
-	if strings.HasSuffix(r.URL.Path, "/_summary") {
-		s.Summary(w, r)
-	} else {
-		s.Get(w, r)
-	}
-	// 	return
-	// }
 
-	// s.QueryHTML(w, r)
+	if strings.HasPrefix(r.URL.Path, "/fields/") {
+		field := strings.TrimPrefix(r.URL.Path, "/fields/")
+		if field == "" {
+			s.Fields(w, r)
+		} else {
+			s.FieldDict(w, r, field)
+		}
+		return
+	}
+
+	if r.URL.Path == "/summary" {
+		s.Summary(w, r)
+		return
+	}
+
+	s.Get(w, r)
 }
 
 func (s *HTTPServer) Summary(w http.ResponseWriter, req *http.Request) {
@@ -140,7 +147,34 @@ func (s *HTTPServer) Get(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
+func (s *HTTPServer) FieldDict(w http.ResponseWriter, req *http.Request, field string) {
+	s.Range(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
+		entries, err := s.Searcher.FieldDict(start, end, field)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error get field dicts: %v", err), http.StatusInternalServerError)
+			return
+		}
+		if err := encodeJSON(w, entries); err != nil {
+			http.Error(w, fmt.Sprintf("error get field dicts: %v", err), http.StatusInternalServerError)
+		}
+	})
+}
+
 func (s *HTTPServer) Fields(w http.ResponseWriter, req *http.Request) {
+	s.Range(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
+		fields, err := s.Searcher.Fields(start, end)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error get fields: %v", err), http.StatusInternalServerError)
+			return
+		}
+		if err := encodeJSON(w, fields); err != nil {
+			http.Error(w, fmt.Sprintf("error get fields: %v", err), http.StatusInternalServerError)
+		}
+	})
+}
+
+func (s *HTTPServer) Range(w http.ResponseWriter, req *http.Request,
+	cb func(w http.ResponseWriter, req *http.Request, start, end time.Time)) {
 	queryParams := req.URL.Query()
 
 	var start, end time.Time
@@ -162,13 +196,7 @@ func (s *HTTPServer) Fields(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	fields, err := s.Searcher.Fields(start, end)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("error get fields: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	encodeJSON(w, fields)
+	cb(w, req, start, end)
 }
 func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, allFields bool, cb func(req *bleve.SearchRequest, resp *bleve.SearchResult) error) {
 	queryParams := req.URL.Query()
@@ -191,9 +219,6 @@ func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, allFields 
 			return
 		}
 	}
-	// else {
-	//	end = time.Now()
-	//}
 
 	var searchRequest *bleve.SearchRequest
 	if req.Method == "GET" {
