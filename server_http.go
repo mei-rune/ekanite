@@ -108,7 +108,10 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.DefaultServeMux.ServeHTTP(w, r)
 		return
 	}
-
+	if strings.HasSuffix(r.URL.Path, "/fields") {
+		s.Fields(w, r)
+		return
+	}
 	//if isConsumeJSON(r) {
 	if strings.HasSuffix(r.URL.Path, "/_summary") {
 		s.Summary(w, r)
@@ -137,6 +140,36 @@ func (s *HTTPServer) Get(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
+func (s *HTTPServer) Fields(w http.ResponseWriter, req *http.Request) {
+	queryParams := req.URL.Query()
+
+	var start, end time.Time
+
+	startAt := queryParams.Get("start_at")
+	if startAt != "" {
+		start = parseTime(startAt)
+		if start.IsZero() {
+			http.Error(w, "start_at("+startAt+") is invalid.", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if endAt := queryParams.Get("end_at"); endAt != "" {
+		end = parseTime(endAt)
+		if end.IsZero() {
+			http.Error(w, "end_at("+endAt+") is invalid.", http.StatusBadRequest)
+			return
+		}
+	}
+
+	fields, err := s.Searcher.Fields(start, end)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error get fields: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	encodeJSON(w, fields)
+}
 func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, allFields bool, cb func(req *bleve.SearchRequest, resp *bleve.SearchResult) error) {
 	queryParams := req.URL.Query()
 

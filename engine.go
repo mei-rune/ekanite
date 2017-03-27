@@ -1,7 +1,9 @@
 package ekanite
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"expvar"
 	"fmt"
 	"log"
@@ -33,6 +35,7 @@ var (
 type Searcher interface {
 	Query(startTime, endTime time.Time, req *bleve.SearchRequest,
 		cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error
+	Fields(startTime, endTime time.Time) ([]string, error)
 }
 
 // EventIndexer is the interface a system than can index events must implement.
@@ -403,7 +406,7 @@ func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, c
 		return bleve.ErrorAliasEmpty
 	}
 
-	var indexAlias = make([]bleve.Index, 0, len(indexes))
+	var indexAlias = make([]bleve.Index, 0, len(indexes)*e.NumShards)
 	for _, idx := range indexes {
 		for _, shard := range idx.Shards {
 			indexAlias = append(indexAlias, shard.b)
@@ -415,6 +418,71 @@ func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, c
 		return err
 	}
 	return cb(req, result)
+}
+
+func (e *Engine) Fields(startTime, endTime time.Time) ([]string, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	stats.Add("queriesRx", 1)
+
+	indexes := e.getIndexs(startTime, endTime)
+	if len(indexes) == 0 {
+		return nil, bleve.ErrorAliasEmpty
+	}
+
+	var indexAlias = make([]bleve.Index, 0, len(indexes)*e.NumShards)
+	for _, idx := range indexes {
+		for _, shard := range idx.Shards {
+			indexAlias = append(indexAlias, shard.b)
+		}
+	}
+
+	var wait sync.WaitGroup
+	c := make(chan struct {
+		err    error
+		fields []string
+	}, len(indexAlias))
+
+	wait.Add(len(indexAlias))
+	for idx := range indexAlias {
+		go func(idx int) {
+			defer wait.Done()
+
+			fields, err := indexAlias[idx].Fields()
+			c <- struct {
+				err    error
+				fields []string
+			}{err: err, fields: fields}
+		}(idx)
+	}
+
+	wait.Wait()
+	close(c)
+
+	var allFields = map[string]struct{}{}
+	var errList []error
+	for r := range c {
+		for _, field := range r.fields {
+			allFields[field] = struct{}{}
+		}
+		if r.err != nil {
+			errList = append(errList, r.err)
+		}
+	}
+	if len(errList) > 0 {
+		var buf bytes.Buffer
+		for _, err := range errList {
+			buf.WriteString(err.Error())
+			buf.WriteString("\n")
+		}
+		return nil, errors.New(buf.String())
+	}
+
+	fields := make([]string, 0, len(allFields))
+	for k := range allFields {
+		fields = append(fields, k)
+	}
+	return fields, nil
 }
 
 // Search performs a search.

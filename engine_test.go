@@ -285,26 +285,26 @@ func TestEngine_IndexThenSearch(t *testing.T) {
 	}
 	total, err := e.Total()
 	if err != nil {
-		t.Fatalf("failed to get engine total doc count: %s", err.Error())
+		t.Errorf("failed to get engine total doc count: %s", err.Error())
 	}
 	if total != 3 {
-		t.Fatalf("engine total doc count, got %d, expected 3", total)
+		t.Errorf("engine total doc count, got %d, expected 3", total)
 	}
 
 	c, err := searchString(nil, e, "Text", "philip")
 	if err != nil {
-		t.Fatalf("failed to search for indexed event: %s", err.Error())
+		t.Errorf("failed to search for indexed event: %s", err.Error())
 	}
 
 	if s, _ := <-c; s != line1 {
-		t.Fatalf(`returned source incorrect. got: "%s", exp "%s"`, s, line1)
+		t.Errorf(`returned source incorrect. got: "%s", exp "%s"`, s, line1)
 	}
 	if s, _ := <-c; s != line3 {
-		t.Fatalf(`returned source incorrect. got: "%s", exp "%s"`, s, line3)
+		t.Errorf(`returned source incorrect. got: "%s", exp "%s"`, s, line3)
 	}
 
 	if _, more := <-c; more {
-		t.Fatalf("more documents unexpectedly available")
+		t.Errorf("more documents unexpectedly available")
 	}
 }
 
