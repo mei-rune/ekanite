@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/ekanite/ekanite"
 )
 
 var sequenceNumber int64
@@ -27,7 +29,7 @@ const (
 
 // Collector specifies the interface all network collectors must implement.
 type Collector interface {
-	Start(chan<- *Event) error
+	Start(chan<- ekanite.Document) error
 	Addr() net.Addr
 }
 
@@ -74,7 +76,7 @@ func NewCollector(proto, iface, format string, tlsConfig *tls.Config) (Collector
 }
 
 // Start instructs the TCPCollector to bind to the interface and accept connections.
-func (s *TCPCollector) Start(c chan<- *Event) error {
+func (s *TCPCollector) Start(c chan<- ekanite.Document) error {
 	var ln net.Listener
 	var err error
 	if s.tlsConfig == nil {
@@ -104,7 +106,7 @@ func (s *TCPCollector) Addr() net.Addr {
 	return s.addr
 }
 
-func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- *Event) {
+func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- ekanite.Document) {
 	stats.Add("tcpConnections", 1)
 	defer func() {
 		stats.Add("tcpConnections", -1)
@@ -145,15 +147,23 @@ func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- *Event) {
 		// Log line available?
 		if match {
 			stats.Add("tcpEventsRx", 1)
-			if s.parser.Parse(address, bytes.NewBufferString(log).Bytes()) {
-				c <- &Event{
-					Text:          string(parser.Raw),
-					Parsed:        parser.Result,
-					ReceptionTime: time.Now().UTC(),
-					Sequence:      atomic.AddInt64(&sequenceNumber, 1),
-					SourceIP:      address,
-				}
+
+			s.parser.Parse(address, bytes.NewBufferString(log).Bytes())
+			e := &Event{
+				Text:          string(s.parser.Raw),
+				Parsed:        s.parser.Result,
+				ReceptionTime: time.Now().UTC(),
+				Sequence:      atomic.AddInt64(&sequenceNumber, 1),
+				SourceIP:      address,
 			}
+
+			if _, ok := e.Parsed["timestamp"]; !ok {
+				e.Parsed["timestamp"] = time.Now()
+			}
+			e.Parsed["address"] = address
+			e.Parsed["reception"] = e.ReceptionTime
+
+			c <- e
 		}
 
 		// Was the connection closed?
@@ -164,7 +174,7 @@ func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- *Event) {
 }
 
 // Start instructs the UDPCollector to start reading packets from the interface.
-func (s *UDPCollector) Start(c chan<- *Event) error {
+func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 	conn, err := net.ListenUDP("udp", s.addr)
 	if err != nil {
 		return err
@@ -184,16 +194,24 @@ func (s *UDPCollector) Start(c chan<- *Event) error {
 				continue
 			}
 			address := addr.String()
-			log := strings.Trim(string(buf[:n]), "\r\n")
-			if s.parser.Parse(address, bytes.NewBufferString(log).Bytes()) {
-				c <- &Event{
-					Text:          log,
-					Parsed:        parser.Result,
-					ReceptionTime: time.Now().UTC(),
-					Sequence:      atomic.AddInt64(&sequenceNumber, 1),
-					SourceIP:      address,
-				}
+			log := bytes.TrimSpace(buf[:n])
+			s.parser.Parse(address, log)
+
+			e := &Event{
+				Text:          string(log),
+				Parsed:        s.parser.Result,
+				ReceptionTime: time.Now().UTC(),
+				Sequence:      atomic.AddInt64(&sequenceNumber, 1),
+				SourceIP:      address,
 			}
+
+			if _, ok := e.Parsed["timestamp"]; !ok {
+				e.Parsed["timestamp"] = time.Now()
+			}
+			e.Parsed["address"] = address
+			e.Parsed["reception"] = e.ReceptionTime
+
+			c <- e
 			stats.Add("udpEventsRx", 1)
 		}
 	}()

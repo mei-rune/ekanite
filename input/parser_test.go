@@ -35,6 +35,10 @@ func Test_Formats(t *testing.T) {
 }
 */
 
+func ToJavaTime(t time.Time) time.Time {
+	return t //.Format(time.RFC3339Nano)
+}
+
 func Test_Parsing(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
@@ -600,6 +604,18 @@ func AssertDeepEquals(t *testing.T, key string, actual, excepted interface{}) {
 				t.Errorf("[%v] excepted is %#v", key, t2.Format(time.RFC3339Nano))
 			}
 			return
+		}
+		if s, ok := excepted.(string); ok {
+			for _, layout := range []string{time.RFC3339, time.RFC3339Nano} {
+				t2, err := time.Parse(layout, s)
+				if err == nil {
+					if !t1.Equal(t2) {
+						t.Errorf("[%v] actual is %#v", key, t1.Format(time.RFC3339Nano))
+						t.Errorf("[%v] excepted is %#v", key, t2.Format(time.RFC3339Nano))
+					}
+					return
+				}
+			}
 		}
 	}
 

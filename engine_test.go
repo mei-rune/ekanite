@@ -2,13 +2,15 @@ package ekanite
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/ekanite/ekanite/input"
+	"github.com/blevesearch/bleve"
 )
 
 type TestIndexer struct {
@@ -16,7 +18,7 @@ type TestIndexer struct {
 	EventsRx  int
 }
 
-func (t *TestIndexer) Index(b []*Event) error {
+func (t *TestIndexer) Index(b []Document) error {
 	t.BatchesRx++
 	t.EventsRx += len(b)
 	return nil
@@ -278,7 +280,7 @@ func TestEngine_IndexThenSearch(t *testing.T) {
 	line3 := "auth password rejected for user philip"
 	ev3 := newIndexableEvent(line3, parseTime("1982-02-05T04:43:02Z"))
 
-	if err := e.Index([]*Event{ev1, ev2, ev3}); err != nil {
+	if err := e.Index([]Document{ev1, ev2, ev3}); err != nil {
 		t.Fatalf("failed to index events: %s", err.Error())
 	}
 	total, err := e.Total()
@@ -289,7 +291,7 @@ func TestEngine_IndexThenSearch(t *testing.T) {
 		t.Fatalf("engine total doc count, got %d, expected 3", total)
 	}
 
-	c, err := e.Search("philip")
+	c, err := searchString(nil, e, "Text", "philip")
 	if err != nil {
 		t.Fatalf("failed to search for indexed event: %s", err.Error())
 	}
@@ -423,7 +425,7 @@ func testEngineIndexForReferenceTime(t *testing.T, e *Engine) {
 func testEngineIndex(t *testing.T, e *Engine) {
 	ev := newIndexableEvent("this is event 1234", parseTime("1982-02-05T04:43:00Z"))
 
-	if err := e.Index([]*Event{ev}); err != nil {
+	if err := e.Index([]Document{ev}); err != nil {
 		t.Fatalf("failed to index event %v: %s", ev, err.Error())
 	}
 	total, err := e.Total()
@@ -440,7 +442,7 @@ func testEngineIndex(t *testing.T, e *Engine) {
 func testEngineIndexPrime(t *testing.T, e *Engine) {
 	rt := parseTime("1982-02-05T04:43:00Z")
 	batchSize := 97
-	batch := make([]*Event, 0, batchSize)
+	batch := make([]Document, 0, batchSize)
 	for b := 0; b < batchSize; b++ {
 		ev := newIndexableEvent("this is event 1234", rt)
 		rt = rt.Add(time.Second)
@@ -508,18 +510,77 @@ func containsOrFail(t *testing.T, path, contents string) {
 	}
 }
 
-func newInputEvent(Line string, refTime time.Time) *input.Event {
-	return &input.Event{
-		Text:          Line,
+var sequence int64 = 0
+
+func newInputEvent(line string, refTime time.Time) Document {
+	return newIndexableEvent(line, refTime)
+}
+
+func newIndexableEvent(line string, refTime time.Time) Document {
+	sequence++
+	return &testEvent{
+		Text:          line,
 		ReceptionTime: refTime,
+		Sequence:      sequence,
 	}
 }
 
-func newIndexableEvent(line string, refTime time.Time) *Event {
-	return &Event{
-		&input.Event{
-			Text:          line,
-			ReceptionTime: refTime,
-		},
+// Event is a log message, with a reception timestamp and sequence number.
+type testEvent struct {
+	Text          string    // Delimited log line
+	ReceptionTime time.Time // Time log line was received
+	Sequence      int64     // Provides order of reception
+	SourceIP      string    // Sender's IP address
+}
+
+// ID returns a unique ID for the event.
+func (e *testEvent) ID() DocID {
+	return DocID(fmt.Sprintf("%016x%016x",
+		uint64(e.ReferenceTime().UnixNano()), uint64(e.Sequence)))
+}
+
+// Data returns the indexable data.
+func (e *testEvent) Data() interface{} {
+	return e
+}
+
+// ReferenceTime returns the reference time of an event.
+func (e *testEvent) ReferenceTime() time.Time {
+	return e.ReceptionTime
+}
+
+func searchString(logger *log.Logger, searcher Searcher, field, q string) (<-chan string, error) {
+	query := bleve.NewQueryStringQuery(q)
+	searchRequest := bleve.NewSearchRequest(query)
+	searchRequest.Size = maxSearchHitSize
+	searchRequest.Fields = []string{"*"}
+
+	// validate the query
+	err := query.Validate()
+	if err != nil {
+		return nil, err
 	}
+
+	// Buffer channel to control how many docs are sent back.
+	c := make(chan string, 1)
+	go func() {
+		defer close(c)
+
+		// execute the query
+		err := searcher.Query(time.Time{}, time.Now(), searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+			for _, doc := range resp.Hits {
+				// bs, err := doc.Index.GetInternal([]byte(doc.Doc.ID))
+				// if err != nil {
+				// 	return err
+				// }
+				c <- fmt.Sprint(doc.Fields[field])
+			}
+			return nil
+		})
+		if err != nil {
+			logger.Println("error getting document:", err.Error())
+		}
+	}()
+
+	return c, nil
 }

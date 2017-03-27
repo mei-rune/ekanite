@@ -64,7 +64,7 @@ func (a DocIDs) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 type Document interface {
 	ID() DocID
 	Data() interface{}
-	Source() []byte
+	ReferenceTime() time.Time
 }
 
 // Index represents a collection of shards. It contains data for a specific time range.
@@ -187,7 +187,7 @@ func OpenIndex(path string) (*Index, error) {
 		return nil, err
 	}
 
-	shards := make([]*Shard, 0)
+	var shards = make([]*Shard, 0)
 	for _, name := range names {
 		s := NewShard(filepath.Join(path, name))
 		if err := s.Open(); err != nil {
@@ -370,7 +370,7 @@ func (s *Shard) Index(documents []Document) error {
 		if err := batch.Index(string(d.ID()), d.Data()); err != nil {
 			return err // XXX return errors en-masse
 		}
-		batch.SetInternal([]byte(d.ID()), d.Source())
+		//batch.SetInternal([]byte(d.ID()), d.Source())
 	}
 	return s.b.Batch(batch)
 }

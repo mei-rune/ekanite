@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/blevesearch/bleve"
-	"github.com/ekanite/ekanite/input"
 )
 
 // Engine defaults
@@ -30,9 +29,15 @@ var (
 	stats = expvar.NewMap("engine")
 )
 
+// Searcher is the interface any object that perform searches should implement.
+type Searcher interface {
+	Query(startTime, endTime time.Time, req *bleve.SearchRequest,
+		cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error
+}
+
 // EventIndexer is the interface a system than can index events must implement.
 type EventIndexer interface {
-	Index(events []*Event) error
+	Index(events []Document) error
 }
 
 // Batcher accepts "input events", and once it has a certain number, or a certain amount
@@ -44,7 +49,7 @@ type Batcher struct {
 	size     int
 	duration time.Duration
 
-	c chan *input.Event
+	c chan Document
 }
 
 // NewBatcher returns a Batcher for EventIndexer e, a batching size of sz, a maximum duration
@@ -54,14 +59,14 @@ func NewBatcher(e EventIndexer, sz int, dur time.Duration, max int) *Batcher {
 		indexer:  e,
 		size:     sz,
 		duration: dur,
-		c:        make(chan *input.Event, max),
+		c:        make(chan Document, max),
 	}
 }
 
 // Start starts the batching process.
 func (b *Batcher) Start(errChan chan<- error) error {
 	go func() {
-		batch := make([]*Event, 0, b.size)
+		batch := make([]Document, 0, b.size)
 		timer := time.NewTimer(b.duration)
 		timer.Stop() // Stop any first firing.
 
@@ -76,16 +81,13 @@ func (b *Batcher) Start(errChan chan<- error) error {
 			if errChan != nil {
 				errChan <- err
 			}
-			batch = make([]*Event, 0, b.size)
+			batch = make([]Document, 0, b.size)
 		}
 
 		for {
 			select {
 			case event := <-b.c:
-				idxEvent := &Event{
-					event,
-				}
-				batch = append(batch, idxEvent)
+				batch = append(batch, event)
 				if len(batch) == 1 {
 					timer.Reset(b.duration)
 				}
@@ -104,7 +106,7 @@ func (b *Batcher) Start(errChan chan<- error) error {
 }
 
 // C returns the channel on the batcher to which events should be sent.
-func (b *Batcher) C() chan<- *input.Event {
+func (b *Batcher) C() chan<- Document {
 	return b.c
 }
 
@@ -342,7 +344,7 @@ func (e *Engine) createIndexForReferenceTime(rt time.Time) (*Index, error) {
 }
 
 // Index indexes a batch of Events. It blocks until all processing has completed.
-func (e *Engine) Index(events []*Event) error {
+func (e *Engine) Index(events []Document) error {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -391,6 +393,30 @@ func (e *Engine) Index(events []*Event) error {
 	return nil
 }
 
+func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	stats.Add("queriesRx", 1)
+
+	indexes := e.getIndexs(startTime, endTime)
+	if len(indexes) == 0 {
+		return bleve.ErrorAliasEmpty
+	}
+
+	var indexAlias = make([]bleve.Index, 0, len(indexes))
+	for _, idx := range indexes {
+		for _, shard := range idx.Shards {
+			indexAlias = append(indexAlias, shard.b)
+		}
+	}
+
+	result, err := bleve.MultiSearch(context.Background(), req, indexAlias...)
+	if err != nil {
+		return err
+	}
+	return cb(req, result)
+}
+
 // Search performs a search.
 func (e *Engine) Search(query string) (<-chan string, error) {
 	e.mu.RLock()
@@ -424,30 +450,6 @@ func (e *Engine) Search(query string) (<-chan string, error) {
 	}()
 
 	return c, nil
-}
-
-func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, cb func(*bleve.SearchRequest, *SearchResult) error) error {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	stats.Add("queriesRx", 1)
-
-	indexes := e.getIndexs(startTime, endTime)
-	if len(indexes) == 0 {
-		return bleve.ErrorAliasEmpty
-	}
-
-	var indexAlias = make([]bleve.Index, 0, len(indexes))
-	for _, idx := range indexes {
-		for _, shard := range idx.Shards {
-			indexAlias = append(indexAlias, shard.b)
-		}
-	}
-
-	result, err := MultiSearch(context.Background(), req, indexAlias...)
-	if err != nil {
-		return err
-	}
-	return cb(req, result)
 }
 
 // Path returns the path to the directory of indexed data.

@@ -104,65 +104,63 @@ func (s *HTTPServer) Addr() net.Addr {
 
 // ServeHTTP implements a http.Handler, serving the query interface for Ekanite
 func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	dontCache(w, r)
-
-	if isConsumeJSON(r) {
-		if strings.HasSuffix(r.URL.Path, "/_summary") {
-			s.Summary(w, r)
-		} else {
-			s.Get(w, r)
-		}
+	if strings.HasPrefix(r.URL.Path, "/debug/") {
+		http.DefaultServeMux.ServeHTTP(w, r)
 		return
 	}
-	s.QueryHTML(w, r)
+
+	//if isConsumeJSON(r) {
+	if strings.HasSuffix(r.URL.Path, "/_summary") {
+		s.Summary(w, r)
+	} else {
+		s.Get(w, r)
+	}
+	// 	return
+	// }
+
+	// s.QueryHTML(w, r)
 }
 
 func (s *HTTPServer) Summary(w http.ResponseWriter, req *http.Request) {
-	s.Search(w, req, func(req *bleve.SearchRequest, resp *SearchResult) error {
-		return encodeJSON(w, resp.SearchResult)
+	s.Search(w, req, false, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+		return encodeJSON(w, resp.Total)
 	})
 }
 
 func (s *HTTPServer) Get(w http.ResponseWriter, req *http.Request) {
-	s.Search(w, req, func(req *bleve.SearchRequest, resp *SearchResult) error {
-		var documents = make([]interface{}, 0, resp.DocumentHits.Len())
-		for _, doc := range resp.DocumentHits {
-			bs, err := doc.Index.GetInternal([]byte(doc.Doc.ID))
-			if err != nil {
-				return err
-			}
-			jsRaw := json.RawMessage(bs)
-			documents = append(documents, &jsRaw)
+	s.Search(w, req, true, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+		var documents = make([]interface{}, 0, resp.Hits.Len())
+		for _, doc := range resp.Hits {
+			documents = append(documents, doc.Fields)
 		}
-		return encodeJSON(w, resp.SearchResult)
+		return encodeJSON(w, documents)
 	})
 }
 
-func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, cb func(req *bleve.SearchRequest, resp *SearchResult) error) {
+func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, allFields bool, cb func(req *bleve.SearchRequest, resp *bleve.SearchResult) error) {
 	queryParams := req.URL.Query()
 
+	var start, end time.Time
+
 	startAt := queryParams.Get("start_at")
-	if startAt == "" {
-		http.Error(w, "start_at is required.", http.StatusBadRequest)
-		return
+	if startAt != "" {
+		start = parseTime(startAt)
+		if start.IsZero() {
+			http.Error(w, "start_at("+startAt+") is invalid.", http.StatusBadRequest)
+			return
+		}
 	}
 
-	var start = parseTime(startAt)
-	if start.IsZero() {
-		http.Error(w, "start_at("+startAt+") is invalid.", http.StatusBadRequest)
-		return
-	}
-
-	var end time.Time
 	if endAt := queryParams.Get("end_at"); endAt != "" {
 		end = parseTime(endAt)
 		if end.IsZero() {
 			http.Error(w, "end_at("+endAt+") is invalid.", http.StatusBadRequest)
 			return
 		}
-	} else {
-		end = time.Now()
 	}
+	// else {
+	//	end = time.Now()
+	//}
 
 	var searchRequest *bleve.SearchRequest
 	if req.Method == "GET" {
@@ -200,7 +198,7 @@ func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, cb func(re
 		}
 
 		query := bleve.NewQueryStringQuery(q)
-		searchRequest := bleve.NewSearchRequest(query)
+		searchRequest = bleve.NewSearchRequest(query)
 		searchRequest.Size = limit
 		searchRequest.From = offset
 	} else {
@@ -219,6 +217,9 @@ func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, cb func(re
 		}
 	}
 
+	if allFields {
+		searchRequest.Fields = []string{"*"}
+	}
 	//logger.Printf("parsed request %#v", searchRequest)
 
 	// validate the query
@@ -285,8 +286,8 @@ func (s *HTTPServer) QueryHTML(w http.ResponseWriter, r *http.Request) {
 			ReturnResults bool
 			LogMessages   []string
 		}{
-			"Ekanite query interface",
-			fmt.Sprintf(`Ekanite - Listing %d results for "%s" (%s)`, len(resultSlice), userQuery, dur.String()),
+			"query",
+			fmt.Sprintf(`Listing %d results for "%s" (%s)`, len(resultSlice), userQuery, dur.String()),
 			true,
 			resultSlice,
 		}
@@ -330,14 +331,16 @@ func SearchString(logger *log.Logger, searcher Searcher, q string) (<-chan strin
 	// Buffer channel to control how many docs are sent back.
 	c := make(chan string, 1)
 	go func() {
+		defer close(c)
+
 		// execute the query
-		err := searcher.Query(time.Time{}, time.Now(), searchRequest, func(req *bleve.SearchRequest, resp *SearchResult) error {
-			for _, doc := range resp.DocumentHits {
-				bs, err := doc.Index.GetInternal([]byte(doc.Doc.ID))
-				if err != nil {
-					return err
-				}
-				c <- string(bs)
+		err := searcher.Query(time.Time{}, time.Now(), searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+			for _, doc := range resp.Hits {
+				// bs, err := doc.Index.GetInternal([]byte(doc.Doc.ID))
+				// if err != nil {
+				// 	return err
+				// }
+				c <- fmt.Sprint(doc.Fields["message"])
 			}
 			return nil
 		})

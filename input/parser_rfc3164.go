@@ -16,14 +16,14 @@ func (self *rfc3164) Parse(bs []byte) (map[string]interface{}, error) {
 		if '"' == bs[0] {
 			next, pri, err = ParsePriority(bs[1:]) // p.parsePriority()
 			if err != nil {
-				ts := time.Now()
+				txt := string(bs)
 				return map[string]interface{}{
 					"priority":  0,
 					"facility":  0,
 					"severity":  0,
 					"version":   NO_VERSION,
-					"timestamp": ToJavaTime(ts),
-					"message":   string(bs),
+					"timestamp": time.Now(),
+					"message":   txt,
 				}, nil
 			}
 
@@ -63,6 +63,6 @@ func (self *rfc3164) Parse(bs []byte) (map[string]interface{}, error) {
 	if ts.IsZero() {
 		ts = time.Now()
 	}
-	result["timestamp"] = ToJavaTime(ts)
+	result["timestamp"] = ts
 	return result, nil
 }

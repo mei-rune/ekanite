@@ -78,7 +78,7 @@ func (p *LogParser) detectFmt(f string) {
 }
 
 // Parse the given byte slice.
-func (p *LogParser) Parse(address string, b []byte) bool {
+func (p *LogParser) Parse(address string, b []byte) {
 	//p.Result = map[string]interface{}{}
 	p.Raw = b
 	var r Parser
@@ -88,12 +88,17 @@ func (p *LogParser) Parse(address string, b []byte) bool {
 	} else {
 		r = CreateParser(p.fmt)
 	}
-	p.Result, _ = r.Parse(b)
-	//p.rfc5424.parse(p.Raw, &p.Result)
-	//if len(p.Result) == 0 {
-	//	return false
-	//}
-	return true
+	p.Result, err = r.Parse(b)
+	if err != nil {
+		p.Result = map[string]interface{}{
+			"priority":  0,
+			"facility":  0,
+			"severity":  0,
+			"version":   NO_VERSION,
+			"timestamp": time.Now(),
+			"message":   string(b),
+		}
+	}
 }
 
 type Parser interface {
@@ -330,10 +335,6 @@ func ParseTag(bs []byte) ([]byte, string) {
 	} else {
 		return bs, ""
 	}
-}
-
-func ToJavaTime(t time.Time) string {
-	return t.Format(time.RFC3339Nano)
 }
 
 func ShowCursorPos(buff []byte, cursor int) {

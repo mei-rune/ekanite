@@ -1,6 +1,11 @@
 package input
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"github.com/ekanite/ekanite"
+)
 
 // Event is a log message, with a reception timestamp and sequence number.
 type Event struct {
@@ -13,9 +18,15 @@ type Event struct {
 	referenceTime time.Time // Memomized reference time
 }
 
-// NewEvent returns a new Event.
-func NewEvent() *Event {
-	return &Event{}
+// ID returns a unique ID for the event.
+func (e *Event) ID() ekanite.DocID {
+	return ekanite.DocID(fmt.Sprintf("%016x%016x",
+		uint64(e.ReferenceTime().UnixNano()), uint64(e.Sequence)))
+}
+
+// Data returns the indexable data.
+func (e *Event) Data() interface{} {
+	return e.Parsed
 }
 
 // ReferenceTime returns the reference time of an event.
@@ -23,12 +34,19 @@ func (e *Event) ReferenceTime() time.Time {
 	if e.referenceTime.IsZero() {
 		if e.Parsed == nil {
 			e.referenceTime = e.ReceptionTime
-		} else if refTime, err := time.Parse(time.RFC3339, e.Parsed["timestamp"].(string)); err != nil {
+		} else if o, ok := e.Parsed["timestamp"]; !ok {
 			e.referenceTime = e.ReceptionTime
+		} else if ts, ok := o.(time.Time); ok {
+			return ts
+		} else if s, ok := o.(string); ok {
+			if refTime, err := time.Parse(time.RFC3339, s); err != nil {
+				e.referenceTime = e.ReceptionTime
+			} else {
+				e.referenceTime = refTime
+			}
 		} else {
-			e.referenceTime = refTime
+			e.referenceTime = e.ReceptionTime
 		}
-
 	}
 	return e.referenceTime
 }
