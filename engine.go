@@ -259,21 +259,45 @@ func (e *Engine) indexForReferenceTime(t time.Time) *Index {
 
 // getIndexs get all index with a given start and end time and it must be called under lock.
 func (e *Engine) getIndexs(startTime, endTime time.Time) []*Index {
-	var indexes []*Index
-	for _, idx := range e.indexes {
-		if startTime.Before(idx.startTime) { // idx.startTime < startTime
-			if endTime.After(idx.startTime) { // idx.endTime > startTime)
-				//  实际数据 -------s-----e--------
-				//  情况  1  ----s-----e-----------
-				//  情况  2  ----s--------------e--
-				indexes = append(indexes, idx)
+	if startTime.IsZero() {
+		if endTime.IsZero() {
+			return e.indexes
+		}
+
+		var indexes []*Index
+		for _, idx := range e.indexes {
+			if endTime.Before(idx.startTime) {
+				continue
 			}
-		} else if startTime.Before(idx.endTime) {
-			//  实际数据 --s-----e----
-			//  情况  1  ----s-----e--
-			//  情况  2  ----s-e------
 			indexes = append(indexes, idx)
 		}
+		return indexes
+	} else if endTime.IsZero() {
+		var indexes []*Index
+		for _, idx := range e.indexes {
+			if startTime.After(idx.endTime) {
+				continue
+			}
+			indexes = append(indexes, idx)
+		}
+		return indexes
+	}
+
+	var indexes []*Index
+	for _, idx := range e.indexes {
+		if endTime.Before(idx.startTime) {
+			//  实际数据 -------s-----e---
+			//  情况  1  --s--e-----------
+			continue
+		}
+
+		if startTime.After(idx.endTime) {
+			//  实际数据 --s--e-------
+			//  情况  1  -------s--e--
+			continue
+		}
+
+		indexes = append(indexes, idx)
 	}
 
 	return indexes
