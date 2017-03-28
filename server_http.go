@@ -128,6 +128,11 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Path == "/query" {
+		s.QueryHTML(w, r)
+		return
+	}
+
 	s.Get(w, r)
 }
 
