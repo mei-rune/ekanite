@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	endTimeFileName  = "endtime"
-	indexNameLayout  = "20060102_1504"
-	maxSearchHitSize = 10000
+	endTimeFileName = "endtime"
+	indexNameLayout = "20060102_1504"
+	// MaxSearchHitSize the max search record in results
+	MaxSearchHitSize = 10000
 	maxShardCount    = 9999
 )
 
@@ -272,7 +273,9 @@ func (i *Index) Index(documents []Document) error {
 func (i *Index) Search(q string) (DocIDs, error) {
 	query := bleve.NewQueryStringQuery(q)
 	searchRequest := bleve.NewSearchRequest(query)
-	searchRequest.Size = maxSearchHitSize
+	if searchRequest.Size == 0 {
+		searchRequest.Size = MaxSearchHitSize
+	}
 	searchResults, err := i.Alias.Search(searchRequest)
 	if err != nil {
 		return nil, err

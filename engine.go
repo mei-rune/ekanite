@@ -632,3 +632,38 @@ func assert(condition bool, msg string, v ...interface{}) {
 		panic(fmt.Sprintf("assert failed: "+msg, v...))
 	}
 }
+
+func SearchString(logger *log.Logger, searcher Searcher, q string) (<-chan string, error) {
+	query := bleve.NewQueryStringQuery(q)
+	searchRequest := bleve.NewSearchRequest(query)
+	searchRequest.Size = MaxSearchHitSize
+
+	// validate the query
+	err := query.Validate()
+	if err != nil {
+		return nil, err
+	}
+
+	// Buffer channel to control how many docs are sent back.
+	c := make(chan string, 1)
+	go func() {
+		defer close(c)
+
+		// execute the query
+		err := searcher.Query(time.Time{}, time.Now(), searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+			for _, doc := range resp.Hits {
+				// bs, err := doc.Index.GetInternal([]byte(doc.Doc.ID))
+				// if err != nil {
+				// 	return err
+				// }
+				c <- fmt.Sprint(doc.Fields["message"])
+			}
+			return nil
+		})
+		if err != nil {
+			logger.Println("error getting document:", err.Error())
+		}
+	}()
+
+	return c, nil
+}

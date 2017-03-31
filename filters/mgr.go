@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/boltdb/bolt"
 )
@@ -36,52 +35,12 @@ type Query struct {
 	Filters     []Filter `json:"filters,omitempty"`
 }
 
-func NewHTTPServer(db *bolt.DB, name string, handler http.Handler) *HTTPServer {
-	return &HTTPServer{db: db, name: []byte(name), handler: handler}
+type filterServer struct {
+	db   *bolt.DB
+	name []byte
 }
 
-type HTTPServer struct {
-	db      *bolt.DB
-	name    []byte
-	handler http.Handler
-}
-
-func (h *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	pa := strings.Trim(r.URL.Path, "/")
-	switch r.Method {
-	case "GET":
-		if pa == "" {
-			h.List(w, r)
-		} else {
-			h.Read(w, r, pa)
-		}
-	case "POST":
-		if pa != "" {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			w.Write([]byte("MethodNotAllowed"))
-		} else {
-			h.Create(w, r)
-		}
-	case "DELETE":
-		if pa == "" {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			w.Write([]byte("MethodNotAllowed"))
-		} else {
-			h.Delete(w, r, pa)
-		}
-	case "PUT":
-		if pa == "" {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			w.Write([]byte("MethodNotAllowed"))
-		} else {
-			h.Update(w, r, pa)
-		}
-	default:
-		h.handler.ServeHTTP(w, r)
-	}
-}
-
-func (h *HTTPServer) List(w http.ResponseWriter, r *http.Request) {
+func (h *filterServer) List(w http.ResponseWriter, r *http.Request) {
 	var rs [][]byte
 	err := h.db.View(func(tx *bolt.Tx) error {
 		bkt := tx.Bucket(h.name)
@@ -110,7 +69,7 @@ func (h *HTTPServer) List(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("]"))
 }
 
-func (h *HTTPServer) ListID(w http.ResponseWriter, r *http.Request) {
+func (h *filterServer) ListID(w http.ResponseWriter, r *http.Request) {
 	var rs []string
 	err := h.db.View(func(tx *bolt.Tx) error {
 		bkt := tx.Bucket(h.name)
@@ -132,7 +91,7 @@ func (h *HTTPServer) ListID(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rs)
 }
 
-func (h *HTTPServer) Read(w http.ResponseWriter, r *http.Request, id string) {
+func (h *filterServer) Read(w http.ResponseWriter, r *http.Request, id string) {
 	var bs []byte
 	err := h.db.View(func(tx *bolt.Tx) error {
 		bkt := tx.Bucket(h.name)
@@ -152,7 +111,7 @@ func (h *HTTPServer) Read(w http.ResponseWriter, r *http.Request, id string) {
 	w.Write(bs)
 }
 
-func (h *HTTPServer) Create(w http.ResponseWriter, r *http.Request) {
+func (h *filterServer) Create(w http.ResponseWriter, r *http.Request) {
 	bs, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -190,7 +149,7 @@ func (h *HTTPServer) Create(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func (h *HTTPServer) Delete(w http.ResponseWriter, r *http.Request, id string) {
+func (h *filterServer) Delete(w http.ResponseWriter, r *http.Request, id string) {
 	err := h.db.Update(func(tx *bolt.Tx) error {
 		if !tx.Writable() {
 			return bolt.ErrTxNotWritable
@@ -212,7 +171,7 @@ func (h *HTTPServer) Delete(w http.ResponseWriter, r *http.Request, id string) {
 	w.Write([]byte("OK"))
 }
 
-func (h *HTTPServer) Update(w http.ResponseWriter, r *http.Request, id string) {
+func (h *filterServer) Update(w http.ResponseWriter, r *http.Request, id string) {
 	bs, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)

@@ -95,7 +95,14 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.Fields(w, r)
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/filters") {
+
+	if strings.HasPrefix(r.URL.Path, "/query/") {
+		filterName := strings.TrimPrefix(r.URL.Path, "/query/")
+		if filterName != "" {
+			s.Get(w, r)
+			return
+		}
+	} else if strings.HasPrefix(r.URL.Path, "/filters") {
 		pa := strings.Trim(r.URL.Path, "/")
 		switch r.Method {
 		case "GET":
@@ -128,9 +135,7 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.DefaultServeMux.ServeHTTP(w, r)
 		return
-	}
-
-	if strings.HasPrefix(r.URL.Path, "/fields/") {
+	} else if strings.HasPrefix(r.URL.Path, "/fields/") {
 		field := strings.TrimPrefix(r.URL.Path, "/fields/")
 		if field == "" {
 			s.Fields(w, r)
@@ -138,10 +143,11 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.FieldDict(w, r, field)
 		}
 		return
-	}
-
-	if r.URL.Path == "/summary" {
+	} else if r.URL.Path == "/summary" {
 		s.Summary(w, r)
+		return
+	} else if r.URL.Path == "/" {
+		s.Get(w, r)
 		return
 	}
 
@@ -150,7 +156,7 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 	return
 	// }
 
-	s.Get(w, r)
+	http.DefaultServeMux.ServeHTTP(w, r)
 }
 
 func (s *HTTPServer) Summary(w http.ResponseWriter, req *http.Request) {
