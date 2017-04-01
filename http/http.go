@@ -103,11 +103,11 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if strings.HasPrefix(r.URL.Path, "/filters") {
-		pa := strings.Trim(r.URL.Path, "/")
+		pa := strings.Trim(strings.TrimPrefix(r.URL.Path, "/filters"), "/")
 		switch r.Method {
 		case "GET":
 			if pa == "" {
-				s.filters.List(w, r)
+				s.filters.ListID(w, r)
 			} else {
 				s.filters.Read(w, r, pa)
 			}
