@@ -71,6 +71,13 @@ type HTTPServer struct {
 // NewHTTPServer returns a new Server instance.
 func NewHTTPServer(addr string, searcher ekanite.Searcher, db *bolt.DB, name string) *HTTPServer {
 	//engine := *echo.Echo
+	err := db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(name))
+		return err
+	})
+	if err != nil {
+		panic(err)
+	}
 
 	return &HTTPServer{
 		addr:     addr,
@@ -132,8 +139,9 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				s.filters.Update(w, r, pa)
 			}
+		default:
+			http.DefaultServeMux.ServeHTTP(w, r)
 		}
-		http.DefaultServeMux.ServeHTTP(w, r)
 		return
 	} else if strings.HasPrefix(r.URL.Path, "/fields/") {
 		field := strings.TrimPrefix(r.URL.Path, "/fields/")
