@@ -3,7 +3,6 @@ package http
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -14,9 +13,9 @@ import (
 
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search/query"
-	"github.com/boltdb/bolt"
 	"github.com/ekanite/ekanite"
 	"github.com/labstack/echo"
+	"github.com/runner-mei/borm"
 )
 
 var (
@@ -48,11 +47,9 @@ func isConsumeJSON(r *http.Request) bool {
 		strings.Contains(accept, "application/json")
 }
 
-func encodeJSON(w io.Writer, i interface{}) error {
-	if headered, ok := w.(http.ResponseWriter); ok {
-		headered.Header().Set("Cache-Control", "no-cache")
-		headered.Header().Set("Content-type", "application/json")
-	}
+func encodeJSON(w http.ResponseWriter, i interface{}) error {
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-type", "application/json")
 
 	e := json.NewEncoder(w)
 	return e.Encode(i)
@@ -69,20 +66,11 @@ type HTTPServer struct {
 }
 
 // NewHTTPServer returns a new Server instance.
-func NewHTTPServer(addr string, searcher ekanite.Searcher, db *bolt.DB, name string) *HTTPServer {
-	//engine := *echo.Echo
-	err := db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(name))
-		return err
-	})
-	if err != nil {
-		panic(err)
-	}
-
+func NewHTTPServer(addr string, searcher ekanite.Searcher, db *borm.Bucket) *HTTPServer {
 	return &HTTPServer{
 		addr:     addr,
 		Searcher: searcher,
-		filters:  &filterServer{db: db, name: []byte(name)},
+		filters:  &filterServer{db: db},
 		Logger:   log.New(os.Stderr, "[httpserver] ", log.LstdFlags),
 	}
 }
