@@ -22,7 +22,7 @@ import (
 const (
 	DefaultNumShards       = 16
 	DefaultIndexDuration   = 24 * time.Hour
-	DefaultRetentionPeriod = 24 * time.Hour
+	DefaultRetentionPeriod = 7 * 24 * time.Hour
 
 	RetentionCheckInterval = time.Hour
 )

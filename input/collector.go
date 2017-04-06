@@ -179,6 +179,23 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 	if err != nil {
 		return err
 	}
+	var udpBytesRead *expvar.Int
+	if v := stats.Get("udpBytesRead"); v != nil {
+		udpBytesRead, _ = v.(*expvar.Int)
+	}
+	if udpBytesRead == nil {
+		udpBytesRead = new(expvar.Int)
+		stats.Set("udpBytesRead", v)
+	}
+
+	var udpEventsRx *expvar.Int
+	if v := stats.Get("udpEventsRx"); v != nil {
+		udpEventsRx, _ = v.(*expvar.Int)
+	}
+	if udpEventsRx == nil {
+		udpEventsRx = new(expvar.Int)
+		stats.Set("udpEventsRx", v)
+	}
 
 	parser, err := NewParser(s.format)
 	if err != nil {
@@ -189,7 +206,7 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 		buf := make([]byte, msgBufSize)
 		for {
 			n, addr, err := conn.ReadFromUDP(buf)
-			stats.Add("udpBytesRead", int64(n))
+			udpBytesRead.Add(int64(n))
 			if err != nil {
 				continue
 			}
@@ -212,7 +229,7 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 			e.Parsed["reception"] = e.ReceptionTime
 
 			c <- e
-			stats.Add("udpEventsRx", 1)
+			udpEventsRx.Add(1)
 		}
 	}()
 	return nil
