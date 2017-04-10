@@ -185,7 +185,7 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 	}
 	if udpBytesRead == nil {
 		udpBytesRead = new(expvar.Int)
-		stats.Set("udpBytesRead", v)
+		stats.Set("udpBytesRead", udpBytesRead)
 	}
 
 	var udpEventsRx *expvar.Int
@@ -194,7 +194,7 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 	}
 	if udpEventsRx == nil {
 		udpEventsRx = new(expvar.Int)
-		stats.Set("udpEventsRx", v)
+		stats.Set("udpEventsRx", udpEventsRx)
 	}
 
 	parser, err := NewParser(s.format)

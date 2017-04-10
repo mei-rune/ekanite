@@ -93,8 +93,17 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(r.URL.Path, "/query/") {
 		filterName := strings.TrimPrefix(r.URL.Path, "/query/")
+
+		queryParams := r.URL.Query()
+		queryParams.Set("q", "is")
+		r.URL.RawQuery = queryParams.Encode()
+
 		if filterName != "" {
-			s.Get(w, r)
+			if strings.HasSuffix(filterName, "/count") {
+				s.Summary(w, r)
+			} else {
+				s.Get(w, r)
+			}
 			return
 		}
 	} else if strings.HasPrefix(r.URL.Path, "/filters") {
