@@ -15,6 +15,7 @@ import (
 
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/analysis/analyzer/custom"
+	"github.com/blevesearch/bleve/analysis/token/keyword"
 	"github.com/blevesearch/bleve/analysis/tokenizer/regexp"
 	"github.com/blevesearch/bleve/mapping"
 )
@@ -457,10 +458,19 @@ func buildIndexMapping() (*mapping.IndexMappingImpl, error) {
 	timeJustIndexed.IncludeInAll = false
 	timeJustIndexed.IncludeTermVectors = false
 
+	keywordIndexed := bleve.NewTextFieldMapping()
+	keywordIndexed.Analyzer = keyword.Name
+	keywordIndexed.Store = false
+	keywordIndexed.IncludeInAll = true // XXX Move to false when using AST
+	keywordIndexed.IncludeTermVectors = false
+
 	articleMapping := bleve.NewDocumentMapping()
 
 	// Connect field mappings to fields.
 	articleMapping.AddFieldMappingsAt("Message", simpleJustIndexed)
+	articleMapping.AddFieldMappingsAt("address", keywordIndexed)
+	articleMapping.AddFieldMappingsAt("timestamp", timeJustIndexed)
+	articleMapping.AddFieldMappingsAt("reception", timeJustIndexed)
 	articleMapping.AddFieldMappingsAt("ReferenceTime", timeJustIndexed)
 	articleMapping.AddFieldMappingsAt("ReceptionTime", timeJustIndexed)
 

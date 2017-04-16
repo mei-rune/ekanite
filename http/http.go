@@ -59,7 +59,7 @@ func encodeJSON(w http.ResponseWriter, i interface{}) error {
 type HTTPServer struct {
 	addr     string
 	Searcher ekanite.Searcher
-	filters  *filterServer
+	DB       *borm.Bucket
 
 	//engine *echo.Echo
 	Logger *log.Logger
@@ -70,7 +70,7 @@ func NewHTTPServer(addr string, searcher ekanite.Searcher, db *borm.Bucket) *HTT
 	return &HTTPServer{
 		addr:     addr,
 		Searcher: searcher,
-		filters:  &filterServer{db: db},
+		DB:       db,
 		Logger:   log.New(os.Stderr, "[httpserver] ", log.LstdFlags),
 	}
 }
@@ -93,16 +93,12 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(r.URL.Path, "/query/") {
 		filterName := strings.TrimPrefix(r.URL.Path, "/query/")
-
-		queryParams := r.URL.Query()
-		queryParams.Set("q", "is")
-		r.URL.RawQuery = queryParams.Encode()
-
 		if filterName != "" {
 			if strings.HasSuffix(filterName, "/count") {
-				s.Summary(w, r)
+				filterName = strings.TrimSuffix(filterName, "/count")
+				s.SummaryByFilters(w, r, filterName)
 			} else {
-				s.Get(w, r)
+				s.SearchByFilters(w, r, filterName)
 			}
 			return
 		}
@@ -111,30 +107,30 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET":
 			if pa == "" {
-				s.filters.ListID(w, r)
+				s.ListFilterIDs(w, r)
 			} else {
-				s.filters.Read(w, r, pa)
+				s.ReadFilter(w, r, pa)
 			}
 		case "POST":
 			if pa != "" {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				w.Write([]byte("MethodNotAllowed"))
 			} else {
-				s.filters.Create(w, r)
+				s.CreateFilter(w, r)
 			}
 		case "DELETE":
 			if pa == "" {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				w.Write([]byte("MethodNotAllowed"))
 			} else {
-				s.filters.Delete(w, r, pa)
+				s.DeleteFilter(w, r, pa)
 			}
 		case "PUT":
 			if pa == "" {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				w.Write([]byte("MethodNotAllowed"))
 			} else {
-				s.filters.Update(w, r, pa)
+				s.UpdateFilter(w, r, pa)
 			}
 		default:
 			http.DefaultServeMux.ServeHTTP(w, r)
@@ -155,12 +151,6 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.Get(w, r)
 		return
 	}
-
-	// if r.URL.Path == "/query" {
-	// 	s.QueryHTML(w, r)
-	// 	return
-	// }
-
 	http.DefaultServeMux.ServeHTTP(w, r)
 }
 
@@ -181,7 +171,7 @@ func (s *HTTPServer) Get(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *HTTPServer) FieldDict(w http.ResponseWriter, req *http.Request, field string) {
-	s.Range(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
+	s.timeRange(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
 		entries, err := s.Searcher.FieldDict(start, end, field)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error get field dicts: %v", err), http.StatusInternalServerError)
@@ -194,7 +184,7 @@ func (s *HTTPServer) FieldDict(w http.ResponseWriter, req *http.Request, field s
 }
 
 func (s *HTTPServer) Fields(w http.ResponseWriter, req *http.Request) {
-	s.Range(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
+	s.timeRange(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
 		fields, err := s.Searcher.Fields(start, end)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error get fields: %v", err), http.StatusInternalServerError)
@@ -206,7 +196,7 @@ func (s *HTTPServer) Fields(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
-func (s *HTTPServer) Range(w http.ResponseWriter, req *http.Request,
+func (s *HTTPServer) timeRange(w http.ResponseWriter, req *http.Request,
 	cb func(w http.ResponseWriter, req *http.Request, start, end time.Time)) {
 	queryParams := req.URL.Query()
 
@@ -231,7 +221,42 @@ func (s *HTTPServer) Range(w http.ResponseWriter, req *http.Request,
 
 	cb(w, req, start, end)
 }
+
 func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, allFields bool, cb func(req *bleve.SearchRequest, resp *bleve.SearchResult) error) {
+	var searchRequest *bleve.SearchRequest
+	if req.Method == "GET" {
+		queryParams := req.URL.Query()
+		q := queryParams.Get("q")
+		if q == "" {
+			http.Error(w, "q is required.", http.StatusBadRequest)
+			return
+		}
+
+		query := bleve.NewQueryStringQuery(q)
+		searchRequest = bleve.NewSearchRequest(query)
+	} else {
+		requestBody, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error reading request body: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		searchRequest = new(bleve.SearchRequest)
+		err = json.Unmarshal(requestBody, searchRequest)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error parsing query: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if allFields {
+		searchRequest.Fields = []string{"*"}
+	}
+
+	s.SearchIn(w, req, searchRequest, cb)
+}
+
+func (s *HTTPServer) SearchIn(w http.ResponseWriter, req *http.Request, searchRequest *bleve.SearchRequest, cb func(req *bleve.SearchRequest, resp *bleve.SearchResult) error) {
 	queryParams := req.URL.Query()
 
 	var start, end time.Time
@@ -253,31 +278,22 @@ func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, allFields 
 		}
 	}
 
-	var searchRequest *bleve.SearchRequest
-	if req.Method == "GET" {
-		q := queryParams.Get("q")
-		if q == "" {
-			http.Error(w, "q is required.", http.StatusBadRequest)
-			return
-		}
-
-		query := bleve.NewQueryStringQuery(q)
-		searchRequest = bleve.NewSearchRequest(query)
-	} else {
-		requestBody, err := ioutil.ReadAll(req.Body)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("error reading request body: %v", err), http.StatusBadRequest)
-			return
-		}
-		//logger.Printf("request body: %s", requestBody)
-
-		searchRequest = new(bleve.SearchRequest)
-		err = json.Unmarshal(requestBody, searchRequest)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("error parsing query: %v", err), http.StatusBadRequest)
-			return
+	if !start.IsZero() || !end.IsZero() {
+		conjunctionQuery, ok := searchRequest.Query.(*query.ConjunctionQuery)
+		if ok {
+			inclusive := true
+			conjunctionQuery.AddQuery(bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive))
+		} else {
+			inclusive := true
+			searchRequest.Query = bleve.NewConjunctionQuery(searchRequest.Query,
+				bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive))
 		}
 	}
+
+	// var searchRequest *bleve.SearchRequest
+	// query := bleve.NewConjunctionQuery(queries...)
+	// searchRequest = bleve.NewSearchRequest(query)
+	// searchRequest.SortBy([]string{"timestamp"})
 
 	{
 		if limitStr := queryParams.Get("limit"); limitStr != "" {
@@ -307,10 +323,10 @@ func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, allFields 
 		}
 	}
 
-	if allFields {
-		searchRequest.Fields = []string{"*"}
-	}
-	//logger.Printf("parsed request %#v", searchRequest)
+	// if allFields {
+	// 	searchRequest.Fields = []string{"*"}
+	// }
+	s.Logger.Printf("parsed request %#v", searchRequest)
 
 	// validate the query
 	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {
