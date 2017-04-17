@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -82,6 +83,13 @@ func (s *HTTPServer) Start() error {
 
 // ServeHTTP implements a http.Handler, serving the query interface for Ekanite
 func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if o := recover(); o != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintln(w, o)
+			w.Write(debug.Stack())
+		}
+	}()
 	if strings.HasPrefix(r.URL.Path, "/debug/") {
 		http.DefaultServeMux.ServeHTTP(w, r)
 		return
@@ -102,7 +110,11 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(r.URL.Path, "/filters") {
+
+		http.DefaultServeMux.ServeHTTP(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/filters") {
 		pa := strings.Trim(strings.TrimPrefix(r.URL.Path, "/filters"), "/")
 		switch r.Method {
 		case "GET":
@@ -136,7 +148,9 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.DefaultServeMux.ServeHTTP(w, r)
 		}
 		return
-	} else if strings.HasPrefix(r.URL.Path, "/fields/") {
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/fields/") {
 		field := strings.TrimPrefix(r.URL.Path, "/fields/")
 		if field == "" {
 			s.Fields(w, r)
@@ -144,10 +158,14 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.FieldDict(w, r, field)
 		}
 		return
-	} else if r.URL.Path == "/summary" {
+	}
+
+	if r.URL.Path == "/summary" {
 		s.Summary(w, r)
 		return
-	} else if r.URL.Path == "/" {
+	}
+
+	if r.URL.Path == "/" {
 		s.Get(w, r)
 		return
 	}
