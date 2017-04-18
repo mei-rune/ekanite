@@ -45,9 +45,16 @@ func (f *Filter) Create() query.Query {
 		q.SetField(f.Field)
 		return q
 	case "Term":
-		q := bleve.NewTermQuery(f.Values[0])
-		q.SetField(f.Field)
-		return q
+		if len(f.Values) == 0 {
+			panic(errors.New("'" + f.Field + "' has invalid values"))
+		}
+		var queries []query.Query
+		for _, v := range f.Values {
+			q := bleve.NewTermQuery(v)
+			q.SetField(f.Field)
+			queries = append(queries, q)
+		}
+		return bleve.NewDisjunctionQuery(queries...)
 	case "Wildcard":
 		q := bleve.NewWildcardQuery(f.Values[0])
 		q.SetField(f.Field)
