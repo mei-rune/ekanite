@@ -94,6 +94,19 @@ func Test_Parsing(t *testing.T) {
 				"version":  NO_VERSION,
 			}},
 		{
+			fmt:     "syslog",
+			message: `<33>Apr 18 14:01:47 mfk nssm[info] 1040 Service tpt received START control, which will be handled. `,
+			expected: map[string]interface{}{
+				"priority":  33,
+				"timestamp": ToJavaTime(time.Date(now.Year(), time.April, 18, 14, 1, 47, 0, time.UTC)),
+				"version":   NO_VERSION,
+				"host":      "mfk",
+				"app":       "nssm[info]",
+				"pid":       1040,
+				"message":   `tpt received START control, which will be handled.`,
+			},
+		},
+		{
 			fmt: "syslog",
 			// no STRUCTURED-DATA
 			message: "<34>1 2003-10-11T22:14:15.003Z mymachine.example.com su - ID47 - 'su root' failed for lonvick on /dev/pts/8",

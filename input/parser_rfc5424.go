@@ -158,6 +158,11 @@ func (p *rfc5424) parseTimestamp(bs []byte) ([]byte, time.Time, error) {
 	}
 	next, fd, err := parseFullDate(bs[to:])
 	if err != nil {
+		next, ts, e := ParseTimestamp(bs[to:])
+		if e == nil {
+			return next, ts, nil
+		}
+
 		return bs, ts, err
 	}
 	if next[0] != 'T' {

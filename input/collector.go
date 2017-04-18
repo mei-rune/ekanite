@@ -210,7 +210,7 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 			if err != nil {
 				continue
 			}
-			address := addr.String()
+			address := addr.IP.String()
 			log := bytes.TrimSpace(buf[:n])
 			s.parser.Parse(address, log)
 
