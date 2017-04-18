@@ -297,14 +297,15 @@ func (s *HTTPServer) SearchIn(w http.ResponseWriter, req *http.Request, searchRe
 	}
 
 	if !start.IsZero() || !end.IsZero() {
+		inclusive := true
+		timeQuery := bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive)
+		timeQuery.SetField("reception")
+
 		conjunctionQuery, ok := searchRequest.Query.(*query.ConjunctionQuery)
 		if ok {
-			inclusive := true
-			conjunctionQuery.AddQuery(bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive))
+			conjunctionQuery.AddQuery(timeQuery)
 		} else {
-			inclusive := true
-			searchRequest.Query = bleve.NewConjunctionQuery(searchRequest.Query,
-				bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive))
+			searchRequest.Query = bleve.NewConjunctionQuery(searchRequest.Query, timeQuery)
 		}
 	}
 

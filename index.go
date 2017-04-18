@@ -15,7 +15,7 @@ import (
 
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/analysis/analyzer/custom"
-	"github.com/blevesearch/bleve/analysis/token/keyword"
+	"github.com/blevesearch/bleve/analysis/analyzer/keyword"
 	"github.com/blevesearch/bleve/analysis/tokenizer/regexp"
 	"github.com/blevesearch/bleve/mapping"
 )
@@ -123,6 +123,9 @@ func NewIndex(path string, startTime, endTime time.Time, numShards int) (*Index,
 	_, err = f.WriteString(endTime.UTC().Format(indexNameLayout))
 	if err != nil {
 		return nil, err
+	}
+	if numShards == 0 {
+		numShards = 1
 	}
 
 	// Create the shards.
@@ -371,6 +374,7 @@ func (s *Shard) Index(documents []Document) error {
 	batch := s.b.NewBatch()
 
 	for _, d := range documents {
+		fmt.Println(d.Data())
 		if err := batch.Index(string(d.ID()), d.Data()); err != nil {
 			return err // XXX return errors en-masse
 		}
@@ -449,30 +453,28 @@ func buildIndexMapping() (*mapping.IndexMappingImpl, error) {
 	// Create field-specific mappings.
 
 	simpleJustIndexed := bleve.NewTextFieldMapping()
-	simpleJustIndexed.Store = false
+	simpleJustIndexed.Store = true
 	simpleJustIndexed.IncludeInAll = true // XXX Move to false when using AST
 	simpleJustIndexed.IncludeTermVectors = false
 
 	timeJustIndexed := bleve.NewDateTimeFieldMapping()
-	timeJustIndexed.Store = false
-	timeJustIndexed.IncludeInAll = false
+	timeJustIndexed.Store = true
+	timeJustIndexed.IncludeInAll = true
 	timeJustIndexed.IncludeTermVectors = false
 
 	keywordIndexed := bleve.NewTextFieldMapping()
 	keywordIndexed.Analyzer = keyword.Name
-	keywordIndexed.Store = false
+	keywordIndexed.Store = true
 	keywordIndexed.IncludeInAll = true // XXX Move to false when using AST
 	keywordIndexed.IncludeTermVectors = false
 
 	articleMapping := bleve.NewDocumentMapping()
 
 	// Connect field mappings to fields.
-	articleMapping.AddFieldMappingsAt("Message", simpleJustIndexed)
+	articleMapping.AddFieldMappingsAt("message", simpleJustIndexed)
 	articleMapping.AddFieldMappingsAt("address", keywordIndexed)
 	articleMapping.AddFieldMappingsAt("timestamp", timeJustIndexed)
 	articleMapping.AddFieldMappingsAt("reception", timeJustIndexed)
-	articleMapping.AddFieldMappingsAt("ReferenceTime", timeJustIndexed)
-	articleMapping.AddFieldMappingsAt("ReceptionTime", timeJustIndexed)
 
 	// Tell the index about field mappings.
 	indexMapping.DefaultMapping = articleMapping

@@ -225,28 +225,40 @@ func (h *HTTPServer) UpdateFilter(w http.ResponseWriter, r *http.Request, id str
 }
 
 func (s *HTTPServer) SummaryByFilters(w http.ResponseWriter, req *http.Request, name string) {
-	var q Query
-	if err := s.DB.Get(name, &q); err != nil {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("Bucket: " + err.Error()))
-		return
+	var q query.Query
+	if name == "0" {
+		q = bleve.NewQueryStringQuery("")
+	} else {
+		var qu Query
+		if err := s.DB.Get(name, &qu); err != nil {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.Write([]byte("Bucket: " + err.Error()))
+			return
+		}
+		q = bleve.NewConjunctionQuery(qu.Create()...)
 	}
 
-	searchRequest := bleve.NewSearchRequest(bleve.NewConjunctionQuery(q.Create()...))
+	searchRequest := bleve.NewSearchRequest(q)
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		return encodeJSON(w, resp.Total)
 	})
 }
 
 func (s *HTTPServer) SearchByFilters(w http.ResponseWriter, req *http.Request, name string) {
-	var q Query
-	if err := s.DB.Get(name, &q); err != nil {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("Bucket: " + err.Error()))
-		return
+	var q query.Query
+	if name == "0" {
+		q = bleve.NewQueryStringQuery("")
+	} else {
+		var qu Query
+		if err := s.DB.Get(name, &qu); err != nil {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.Write([]byte("Bucket: " + err.Error()))
+			return
+		}
+		q = bleve.NewConjunctionQuery(qu.Create()...)
 	}
 
-	searchRequest := bleve.NewSearchRequest(bleve.NewConjunctionQuery(q.Create()...))
+	searchRequest := bleve.NewSearchRequest(q)
 	searchRequest.Fields = []string{"*"}
 
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
