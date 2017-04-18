@@ -123,6 +123,9 @@ func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- ekanite.Document
 	var log string
 	var match bool
 	var address = conn.RemoteAddr().String()
+	if addr, _, err := net.SplitHostPort(address); err == nil {
+		address = addr
+	}
 
 	for {
 		conn.SetReadDeadline(time.Now().Add(newlineTimeout))
@@ -162,6 +165,7 @@ func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- ekanite.Document
 			}
 			e.Parsed["address"] = address
 			e.Parsed["reception"] = e.ReceptionTime
+			e.Parsed["message"] = e.Text
 
 			c <- e
 		}
