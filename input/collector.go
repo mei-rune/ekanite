@@ -227,6 +227,7 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 			}
 			e.Parsed["address"] = address
 			e.Parsed["reception"] = e.ReceptionTime
+			e.Parsed["message"] = e.Text
 
 			c <- e
 			udpEventsRx.Add(1)
