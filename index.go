@@ -374,7 +374,6 @@ func (s *Shard) Index(documents []Document) error {
 	batch := s.b.NewBatch()
 
 	for _, d := range documents {
-		fmt.Println(d.Data())
 		if err := batch.Index(string(d.ID()), d.Data()); err != nil {
 			return err // XXX return errors en-masse
 		}

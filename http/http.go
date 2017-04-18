@@ -349,6 +349,10 @@ func (s *HTTPServer) SearchIn(w http.ResponseWriter, req *http.Request, searchRe
 		}
 	}
 
+	if sortBy := queryParams.Get("sort_by"); sortBy != "" {
+		searchRequest.SortBy(sortBy)
+	}
+
 	// if allFields {
 	// 	searchRequest.Fields = []string{"*"}
 	// }
