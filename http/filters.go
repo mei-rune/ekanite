@@ -226,9 +226,7 @@ func (h *HTTPServer) UpdateFilter(w http.ResponseWriter, r *http.Request, id str
 
 func (s *HTTPServer) SummaryByFilters(w http.ResponseWriter, req *http.Request, name string) {
 	var q query.Query
-	if name == "0" {
-		q = bleve.NewQueryStringQuery("")
-	} else {
+	if name != "0" {
 		var qu Query
 		if err := s.DB.Get(name, &qu); err != nil {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -246,9 +244,7 @@ func (s *HTTPServer) SummaryByFilters(w http.ResponseWriter, req *http.Request, 
 
 func (s *HTTPServer) SearchByFilters(w http.ResponseWriter, req *http.Request, name string) {
 	var q query.Query
-	if name == "0" {
-		q = bleve.NewQueryStringQuery("")
-	} else {
+	if name != "0" {
 		var qu Query
 		if err := s.DB.Get(name, &qu); err != nil {
 			w.WriteHeader(http.StatusMethodNotAllowed)

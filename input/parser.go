@@ -231,12 +231,8 @@ func fixTimestampIfNeeded(ts *time.Time) {
 	*ts = newTs
 }
 
-// https://tools.ietf.org/html/rfc3164#section-4.1.2
-func ParseTimestamp(bs []byte) ([]byte, time.Time, error) {
-	var ts time.Time
-	var err error
-	var tsFmtLen int
-	tsFmts := []string{
+var (
+	tsFmts = []string{
 		"Jan 02 15:04:05 2006",
 		"Jan  2 15:04:05 2006",
 		"Jan 2 15:04:05 2006",
@@ -244,6 +240,29 @@ func ParseTimestamp(bs []byte) ([]byte, time.Time, error) {
 		"Jan  2 15:04:05",
 		"Jan 2 15:04:05",
 	}
+	shortMonthNames = [][]byte{
+		[]byte("Jan"),
+		[]byte("Feb"),
+		[]byte("Mar"),
+		[]byte("Apr"),
+		[]byte("May"),
+		[]byte("Jun"),
+		[]byte("Jul"),
+		[]byte("Aug"),
+		[]byte("Sep"),
+		[]byte("Oct"),
+		[]byte("Nov"),
+		[]byte("Dec"),
+	}
+)
+
+// ParseTimestamp https://tools.ietf.org/html/rfc3164#section-4.1.2
+func ParseTimestamp(bs []byte) ([]byte, time.Time, error) {
+	var ts time.Time
+	var err error
+	var tsFmtLen int
+
+	bs = skipSpace(bs)
 	found := false
 	for _, tsFmt := range tsFmts {
 		tsFmtLen = len(tsFmt)
@@ -257,6 +276,30 @@ func ParseTimestamp(bs []byte) ([]byte, time.Time, error) {
 		}
 	}
 	if !found {
+		found := false
+		for _, s := range shortMonthNames {
+			if bytes.HasPrefix(bs, s) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return bs, ts, ErrTimestampUnknownFormat
+		}
+		fields := bytes.Fields(bs)
+		if len(fields) < 3 {
+			return bs, ts, ErrTimestampUnknownFormat
+		}
+
+		s := string(fields[0]) + " " + string(fields[1]) + " " + string(fields[2])
+		for _, tsFmt := range tsFmts {
+			ts, err = time.Parse(tsFmt, s)
+			if err == nil {
+				fixTimestampIfNeeded(&ts)
+				return bytes.Join(fields[3:], []byte(" ")), ts, nil
+			}
+		}
+
 		//p.cursor = tsFmtLen
 		// XXX : If the timestamp is invalid we try to push the cursor one byte
 		// XXX : further, in case it is a space

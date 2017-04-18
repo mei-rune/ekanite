@@ -29,6 +29,14 @@ func TestParseTimestamp_TrailingSpace(t *testing.T) {
 	ts := time.Date(now.Year(), time.October, 11, 22, 14, 15, 0, time.UTC)
 	assertTimestamp(t, ts, buff, len(buff), nil)
 }
+func TestParseTimestamp_MoreSpace(t *testing.T) {
+	// XXX : no year specified. Assumed current year
+	// XXX : no timezone specified. Assume UTC
+	buff := []byte("Apr 18    13:10:36")
+	now := time.Now()
+	ts := time.Date(now.Year(), time.April, 18, 13, 10, 36, 0, time.UTC)
+	assertTimestamp(t, ts, buff, len(buff), nil)
+}
 func TestParseTimestamp_OneDigitForMonths(t *testing.T) {
 	// XXX : no year specified. Assumed current year
 	// XXX : no timezone specified. Assume UTC

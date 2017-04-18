@@ -301,12 +301,19 @@ func (s *HTTPServer) SearchIn(w http.ResponseWriter, req *http.Request, searchRe
 		timeQuery := bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive)
 		timeQuery.SetField("reception")
 
-		conjunctionQuery, ok := searchRequest.Query.(*query.ConjunctionQuery)
-		if ok {
+		if searchRequest.Query == nil {
+			searchRequest.Query = timeQuery
+		} else if conjunctionQuery, ok := searchRequest.Query.(*query.ConjunctionQuery); ok {
 			conjunctionQuery.AddQuery(timeQuery)
 		} else {
 			searchRequest.Query = bleve.NewConjunctionQuery(searchRequest.Query, timeQuery)
 		}
+	} else if searchRequest.Query == nil {
+		inclusive := true
+		timeQuery := bleve.NewDateRangeInclusiveQuery(start, time.Now(), &inclusive, &inclusive)
+		timeQuery.SetField("reception")
+
+		searchRequest.Query = timeQuery
 	}
 
 	// var searchRequest *bleve.SearchRequest
@@ -345,7 +352,8 @@ func (s *HTTPServer) SearchIn(w http.ResponseWriter, req *http.Request, searchRe
 	// if allFields {
 	// 	searchRequest.Fields = []string{"*"}
 	// }
-	s.Logger.Printf("parsed request %#v", searchRequest)
+	bs, _ := json.Marshal(searchRequest)
+	s.Logger.Printf("parsed request %s", string(bs))
 
 	// validate the query
 	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {
