@@ -272,3 +272,39 @@ func (s *HTTPServer) SearchByFilters(w http.ResponseWriter, req *http.Request, n
 		return encodeJSON(w, documents)
 	})
 }
+
+func (s *HTTPServer) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Request) {
+	var qu Query
+	if err := decodeJSON(req, &qu); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	q := bleve.NewConjunctionQuery(qu.Create()...)
+
+	searchRequest := bleve.NewSearchRequest(q)
+	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+		return encodeJSON(w, resp.Total)
+	})
+}
+
+func (s *HTTPServer) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request) {
+	var qu Query
+	if err := decodeJSON(req, &qu); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	q := bleve.NewConjunctionQuery(qu.Create()...)
+
+	searchRequest := bleve.NewSearchRequest(q)
+	searchRequest.Fields = []string{"*"}
+
+	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+		var documents = make([]interface{}, 0, resp.Hits.Len())
+		for _, doc := range resp.Hits {
+			documents = append(documents, doc.Fields)
+		}
+		return encodeJSON(w, documents)
+	})
+}

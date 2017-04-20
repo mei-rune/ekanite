@@ -56,6 +56,11 @@ func encodeJSON(w http.ResponseWriter, i interface{}) error {
 	return e.Encode(i)
 }
 
+func decodeJSON(req *http.Request, i interface{}) error {
+	decoder := json.NewDecoder(req.Body)
+	return decoder.Decode(i)
+}
+
 // HTTPServer serves query client connections.
 type HTTPServer struct {
 	addr     string
@@ -81,6 +86,23 @@ func (s *HTTPServer) Start() error {
 	return http.ListenAndServe(s.addr, s)
 }
 
+// SplitURLPath 分隔 url path, 取出 url path 的第一部份
+func SplitURLPath(pa string) (string, string) {
+	if "" == pa {
+		return "", ""
+	}
+
+	if '/' == pa[0] {
+		pa = pa[1:]
+	}
+
+	idx := strings.IndexRune(pa, '/')
+	if idx < 0 {
+		return pa, ""
+	}
+	return pa[:idx], pa[idx:]
+}
+
 // ServeHTTP implements a http.Handler, serving the query interface for Ekanite
 func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
@@ -90,82 +112,79 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Write(debug.Stack())
 		}
 	}()
-	if strings.HasPrefix(r.URL.Path, "/debug/") {
+
+	name, pa := SplitURLPath(r.URL.Path)
+	switch name {
+	case "debug":
 		http.DefaultServeMux.ServeHTTP(w, r)
 		return
-	}
-	if r.URL.Path == "/fields" {
-		s.Fields(w, r)
+	case "fields":
+		if pa == "" || pa == "/" {
+			s.Fields(w, r)
+		} else {
+			s.FieldDict(w, r, strings.Trim(pa, "/"))
+		}
 		return
-	}
-
-	if strings.HasPrefix(r.URL.Path, "/query/") {
-		filterName := strings.TrimPrefix(r.URL.Path, "/query/")
-		if filterName != "" {
-			if strings.HasSuffix(filterName, "/count") {
-				filterName = strings.TrimSuffix(filterName, "/count")
-				s.SummaryByFilters(w, r, filterName)
+	case "query":
+		switch pa {
+		case "", "/":
+			if r.Method == "POST" {
+				s.SearchByFiltersInBody(w, r)
+				return
+			}
+		case "/count", "/count/":
+			if r.Method == "POST" {
+				s.SummaryByFiltersInBody(w, r)
+				return
+			}
+		default:
+			if strings.HasSuffix(pa, "/count") {
+				s.SummaryByFilters(w, r, strings.Trim(strings.TrimSuffix(pa, "/count"), "/"))
+			} else if strings.HasSuffix(pa, "/count/") {
+				s.SummaryByFilters(w, r, strings.Trim(strings.TrimSuffix(pa, "/count/"), "/"))
 			} else {
-				s.SearchByFilters(w, r, filterName)
+				s.SearchByFilters(w, r, strings.Trim(pa, "/"))
 			}
 			return
 		}
-
-		http.DefaultServeMux.ServeHTTP(w, r)
-		return
-	}
-	if strings.HasPrefix(r.URL.Path, "/filters") {
-		pa := strings.Trim(strings.TrimPrefix(r.URL.Path, "/filters"), "/")
+	case "filters":
 		switch r.Method {
 		case "GET":
-			if pa == "" {
+			if pa == "" || pa == "/" {
 				s.ListFilterIDs(w, r)
 			} else {
-				s.ReadFilter(w, r, pa)
+				s.ReadFilter(w, r, strings.Trim(pa, "/"))
 			}
+			return
 		case "POST":
-			if pa != "" {
+			if pa != "" || pa == "/" {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				w.Write([]byte("MethodNotAllowed"))
 			} else {
 				s.CreateFilter(w, r)
 			}
+			return
 		case "DELETE":
-			if pa == "" {
+			if pa == "" || pa == "/" {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				w.Write([]byte("MethodNotAllowed"))
 			} else {
-				s.DeleteFilter(w, r, pa)
+				s.DeleteFilter(w, r, strings.Trim(pa, "/"))
 			}
+			return
 		case "PUT":
-			if pa == "" {
+			if pa == "" || pa == "/" {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				w.Write([]byte("MethodNotAllowed"))
 			} else {
-				s.UpdateFilter(w, r, pa)
+				s.UpdateFilter(w, r, strings.Trim(pa, "/"))
 			}
-		default:
-			http.DefaultServeMux.ServeHTTP(w, r)
+			return
 		}
-		return
-	}
-
-	if strings.HasPrefix(r.URL.Path, "/fields/") {
-		field := strings.TrimPrefix(r.URL.Path, "/fields/")
-		if field == "" {
-			s.Fields(w, r)
-		} else {
-			s.FieldDict(w, r, field)
-		}
-		return
-	}
-
-	if r.URL.Path == "/summary" {
+	case "count":
 		s.Summary(w, r)
 		return
-	}
-
-	if r.URL.Path == "/" {
+	case "":
 		s.Get(w, r)
 		return
 	}
