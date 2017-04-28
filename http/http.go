@@ -67,6 +67,7 @@ type HTTPServer struct {
 	Searcher ekanite.Searcher
 	DB       *borm.Bucket
 
+	NoRoute http.Handler
 	//engine *echo.Echo
 	Logger *log.Logger
 }
@@ -181,14 +182,24 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-	case "count":
-		s.Summary(w, r)
-		return
-	case "":
-		s.Get(w, r)
-		return
+	case "raw":
+		switch pa {
+		case "count":
+			s.Summary(w, r)
+			return
+		case "":
+			s.Get(w, r)
+			return
+		default:
+			http.DefaultServeMux.ServeHTTP(w, r)
+			return
+		}
 	}
-	http.DefaultServeMux.ServeHTTP(w, r)
+	if s.NoRoute == nil {
+		http.DefaultServeMux.ServeHTTP(w, r)
+	} else {
+		s.NoRoute.ServeHTTP(w, r)
+	}
 }
 
 func (s *HTTPServer) Summary(w http.ResponseWriter, req *http.Request) {
