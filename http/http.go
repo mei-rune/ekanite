@@ -202,6 +202,12 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *HTTPServer) RenderText(w http.ResponseWriter, req *http.Request, code int, txt string) error {
+	w.WriteHeader(code)
+	_, e := w.Write([]byte(txt))
+	return e
+}
+
 func (s *HTTPServer) Summary(w http.ResponseWriter, req *http.Request) {
 	s.Search(w, req, false, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		return encodeJSON(w, resp.Total)

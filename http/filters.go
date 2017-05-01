@@ -3,12 +3,16 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/blevesearch/bleve"
+	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/runner-mei/borm"
 )
@@ -236,11 +240,17 @@ func (s *HTTPServer) SummaryByFilters(w http.ResponseWriter, req *http.Request, 
 	if name != "0" {
 		var qu Query
 		if err := s.DB.Get(name, &qu); err != nil {
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Bucket: " + err.Error()))
 			return
 		}
 		q = bleve.NewConjunctionQuery(qu.Create()...)
+	}
+
+	queryParams := req.URL.Query()
+	if groupBy := queryParams.Get("group_by"); groupBy != "" {
+		s.groupBy(w, req, q, queryParams, groupBy)
+		return
 	}
 
 	searchRequest := bleve.NewSearchRequest(q)
@@ -254,7 +264,7 @@ func (s *HTTPServer) SearchByFilters(w http.ResponseWriter, req *http.Request, n
 	if name != "0" {
 		var qu Query
 		if err := s.DB.Get(name, &qu); err != nil {
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Bucket: " + err.Error()))
 			return
 		}
@@ -291,8 +301,7 @@ func (s *HTTPServer) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Req
 func (s *HTTPServer) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request) {
 	var qu Query
 	if err := decodeJSON(req, &qu); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
+		s.RenderText(w, req, http.StatusBadRequest, err.Error())
 		return
 	}
 	q := bleve.NewConjunctionQuery(qu.Create()...)
@@ -307,4 +316,171 @@ func (s *HTTPServer) SearchByFiltersInBody(w http.ResponseWriter, req *http.Requ
 		}
 		return encodeJSON(w, documents)
 	})
+}
+
+func (s *HTTPServer) groupBy(w http.ResponseWriter, req *http.Request, q query.Query, params url.Values, groupBy string) {
+	var start, end time.Time
+
+	startAt := params.Get("start_at")
+	if startAt == "" {
+		s.RenderText(w, req, http.StatusBadRequest, "start_at is missing.")
+		return
+	}
+	start = parseTime(startAt)
+	if start.IsZero() {
+		s.RenderText(w, req, http.StatusBadRequest, "start_at("+startAt+") is invalid.")
+		return
+	}
+
+	endAt := params.Get("end_at")
+	if endAt == "" {
+		s.RenderText(w, req, http.StatusBadRequest, "end_at is missing.")
+		return
+	}
+	end = parseTime(endAt)
+	if end.IsZero() {
+		s.RenderText(w, req, http.StatusBadRequest, "end_at("+endAt+") is invalid.")
+		return
+	}
+
+	inclusive := true
+	timeQuery := bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive)
+	timeQuery.SetField("reception")
+
+	if q == nil {
+		q = timeQuery
+	} else if conjunctionQuery, ok := q.(*query.ConjunctionQuery); ok {
+		conjunctionQuery.AddQuery(timeQuery)
+	} else {
+		q = bleve.NewConjunctionQuery(q, timeQuery)
+	}
+
+	ss := strings.Fields(groupBy)
+	switch len(ss) {
+	case 1:
+		s.groupByAny(w, req, q, start, end, groupBy)
+	case 2:
+		if ss[0] != "reception" {
+			s.RenderText(w, req, http.StatusBadRequest,
+				"group by("+groupBy+") is invalid format")
+			return
+		}
+		s.groupByTimestamp(w, req, q, start, end, ss[0], ss[1])
+	default:
+		s.RenderText(w, req, http.StatusBadRequest,
+			"group by("+groupBy+") is invalid format")
+	}
+}
+
+const maxInt32 = 2147483647
+
+func (s *HTTPServer) groupByAny(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field string) {
+	dict, err := s.Searcher.FieldDict(startAt, endAt, field)
+	if err != nil {
+		s.RenderText(w, req, http.StatusBadRequest, "read field dictionary fail,"+err.Error())
+		return
+	}
+	// validate the query
+	if srqv, ok := q.(query.ValidatableQuery); ok {
+		err := srqv.Validate()
+		if err != nil {
+			s.RenderText(w, req, http.StatusBadRequest,
+				fmt.Sprintf("error validating query: %v", err))
+			return
+		}
+	}
+
+	var results = map[string]interface{}{}
+	for _, entry := range dict {
+		var termQuery = bleve.NewTermQuery(entry.Term)
+		termQuery.SetField(field)
+
+		searchRequest := bleve.NewSearchRequest(bleve.NewConjunctionQuery(q, termQuery))
+
+		err := s.Searcher.Query(startAt, endAt, searchRequest,
+			func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+				results[entry.Term] = resp.Total
+				return nil
+			})
+
+		if err != nil {
+			s.RenderText(w, req, http.StatusBadRequest,
+				fmt.Sprintf("error executing query: %v", err))
+			return
+		}
+	}
+
+	encodeJSON(w, results)
+}
+
+func (s *HTTPServer) groupByTimestamp(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field, value string) {
+	facetRequest, err := s.facetByTime(startAt, endAt, field, value)
+	if err != nil {
+		s.RenderText(w, req, http.StatusBadRequest, err.Error())
+		return
+	}
+	searchRequest := bleve.NewSearchRequest(q)
+	searchRequest.AddFacet(field, facetRequest)
+
+	bs, _ := json.Marshal(searchRequest)
+	s.Logger.Printf("parsed request %s", string(bs))
+
+	// validate the query
+	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {
+		err := srqv.Validate()
+		if err != nil {
+			s.RenderText(w, req, http.StatusBadRequest,
+				fmt.Sprintf("error validating query: %v", err))
+			return
+		}
+	}
+
+	// execute the query
+	err = s.Searcher.Query(startAt, endAt, searchRequest,
+		func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+			if len(resp.Facets) == 0 {
+				return errors.New("facets is empty in the search result.")
+			}
+			var results []*search.DateRangeFacet
+
+			for _, facet := range resp.Facets {
+				if results == nil {
+					results = facet.DateRanges
+				} else {
+					results = append(results, facet.DateRanges...)
+				}
+			}
+			return encodeJSON(w, results)
+		})
+
+	if err != nil {
+		s.RenderText(w, req, http.StatusBadRequest,
+			fmt.Sprintf("error executing query: %v", err))
+		return
+	}
+}
+
+func (s *HTTPServer) facetByTime(startAt, endAt time.Time, field, value string) (*bleve.FacetRequest, error) {
+
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return nil, errors.New("`" + value + "' is invalid in 'group by'.")
+	}
+
+	facetRequest := bleve.NewFacetRequest(field, maxInt32)
+
+	nextStart := startAt
+	nextEnd := startAt.Add(-1 * duration)
+	for nextEnd.After(endAt) {
+		name := strconv.FormatInt(nextStart.Unix(), 10) +
+			"-" +
+			strconv.FormatInt(nextEnd.Unix(), 10)
+
+		facetRequest.AddDateTimeRange(name, nextStart, nextEnd)
+
+		nextStart = nextEnd
+		nextEnd = nextStart.Add(-1 * duration)
+	}
+
+	return facetRequest, nil
 }
