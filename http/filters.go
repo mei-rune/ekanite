@@ -435,6 +435,9 @@ func (s *HTTPServer) groupByTimestamp(w http.ResponseWriter, req *http.Request, 
 		}
 	}
 
+	jsBuf, _ := json.Marshal(searchRequest)
+	s.Logger.Printf("parsed request %s", string(jsBuf))
+
 	// execute the query
 	err = s.Searcher.Query(startAt, endAt, searchRequest,
 		func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
@@ -470,8 +473,9 @@ func (s *HTTPServer) facetByTime(startAt, endAt time.Time, field, value string) 
 	facetRequest := bleve.NewFacetRequest(field, maxInt32)
 
 	nextStart := startAt
-	nextEnd := startAt.Add(-1 * duration)
-	for nextEnd.After(endAt) {
+	nextEnd := startAt.Add(duration)
+
+	for nextEnd.Before(endAt) {
 		name := strconv.FormatInt(nextStart.Unix(), 10) +
 			"-" +
 			strconv.FormatInt(nextEnd.Unix(), 10)
@@ -479,7 +483,8 @@ func (s *HTTPServer) facetByTime(startAt, endAt time.Time, field, value string) 
 		facetRequest.AddDateTimeRange(name, nextStart, nextEnd)
 
 		nextStart = nextEnd
-		nextEnd = nextStart.Add(-1 * duration)
+		nextEnd = nextStart.Add(duration)
+		fmt.Println(nextEnd, endAt)
 	}
 
 	return facetRequest, nil

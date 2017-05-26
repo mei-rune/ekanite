@@ -63,9 +63,10 @@ func decodeJSON(req *http.Request, i interface{}) error {
 
 // HTTPServer serves query client connections.
 type HTTPServer struct {
-	addr     string
-	Searcher ekanite.Searcher
-	DB       *borm.Bucket
+	addr      string
+	urlPrefix string
+	Searcher  ekanite.Searcher
+	DB        *borm.Bucket
 
 	NoRoute http.Handler
 	//engine *echo.Echo
@@ -73,12 +74,13 @@ type HTTPServer struct {
 }
 
 // NewHTTPServer returns a new Server instance.
-func NewHTTPServer(addr string, searcher ekanite.Searcher, db *borm.Bucket) *HTTPServer {
+func NewHTTPServer(addr, urlPrefix string, searcher ekanite.Searcher, db *borm.Bucket) *HTTPServer {
 	return &HTTPServer{
-		addr:     addr,
-		Searcher: searcher,
-		DB:       db,
-		Logger:   log.New(os.Stderr, "[httpserver] ", log.LstdFlags),
+		addr:      addr,
+		urlPrefix: urlPrefix,
+		Searcher:  searcher,
+		DB:        db,
+		Logger:    log.New(os.Stderr, "[httpserver] ", log.LstdFlags),
 	}
 }
 
@@ -114,7 +116,16 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	name, pa := SplitURLPath(r.URL.Path)
+	if !strings.HasPrefix(r.URL.Path, s.urlPrefix) {
+		if s.NoRoute == nil {
+			http.DefaultServeMux.ServeHTTP(w, r)
+		} else {
+			s.NoRoute.ServeHTTP(w, r)
+		}
+		return
+	}
+
+	name, pa := SplitURLPath(strings.TrimPrefix(r.URL.Path, s.urlPrefix))
 	switch name {
 	case "debug":
 		http.DefaultServeMux.ServeHTTP(w, r)
