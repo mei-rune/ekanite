@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -333,14 +334,14 @@ func (s *HTTPServer) groupBy(w http.ResponseWriter, req *http.Request, q query.Q
 	}
 
 	endAt := params.Get("end_at")
-	if endAt == "" {
-		s.RenderText(w, req, http.StatusBadRequest, "end_at is missing.")
-		return
-	}
-	end = parseTime(endAt)
-	if end.IsZero() {
-		s.RenderText(w, req, http.StatusBadRequest, "end_at("+endAt+") is invalid.")
-		return
+	if endAt != "" {
+		end = parseTime(endAt)
+		if end.IsZero() {
+			s.RenderText(w, req, http.StatusBadRequest, "end_at("+endAt+") is invalid.")
+			return
+		}
+	} else {
+		end = time.Now()
 	}
 
 	inclusive := true
@@ -453,6 +454,17 @@ func (s *HTTPServer) groupByTimestamp(w http.ResponseWriter, req *http.Request, 
 					results = append(results, facet.DateRanges...)
 				}
 			}
+
+			sort.Slice(results, func(a, b int) bool {
+				if results[a].Start == nil {
+					return false
+				}
+				if results[b].Start == nil {
+					return true
+				}
+
+				return strings.Compare(*results[a].Start, *results[b].Start) < 0
+			})
 			return encodeJSON(w, results)
 		})
 
@@ -464,7 +476,6 @@ func (s *HTTPServer) groupByTimestamp(w http.ResponseWriter, req *http.Request, 
 }
 
 func (s *HTTPServer) facetByTime(startAt, endAt time.Time, field, value string) (*bleve.FacetRequest, error) {
-
 	duration, err := time.ParseDuration(value)
 	if err != nil {
 		return nil, errors.New("`" + value + "' is invalid in 'group by'.")
@@ -484,7 +495,6 @@ func (s *HTTPServer) facetByTime(startAt, endAt time.Time, field, value string) 
 
 		nextStart = nextEnd
 		nextEnd = nextStart.Add(duration)
-		fmt.Println(nextEnd, endAt)
 	}
 
 	return facetRequest, nil

@@ -38,6 +38,27 @@ func parseTime(s string) time.Time {
 			return v.Local()
 		}
 	}
+
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "now()") {
+		durationStr := strings.TrimSpace(strings.TrimPrefix(s, "now()"))
+		if durationStr == "" {
+			return time.Now()
+		}
+		neg := false
+		if strings.HasPrefix(durationStr, "-") {
+			neg = true
+			durationStr = strings.TrimSpace(strings.TrimPrefix(durationStr, "-"))
+		}
+
+		duration, err := time.ParseDuration(durationStr)
+		if err == nil {
+			if neg {
+				duration = -1 * duration
+			}
+			return time.Now().Add(duration)
+		}
+	}
 	return time.Time{}
 }
 
