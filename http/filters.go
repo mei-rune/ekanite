@@ -391,7 +391,7 @@ func (s *HTTPServer) groupByAny(w http.ResponseWriter, req *http.Request, q quer
 		}
 	}
 
-	var results = map[string]interface{}{}
+	var results []map[string]interface{}
 	for _, entry := range dict {
 		var termQuery = bleve.NewTermQuery(entry.Term)
 		termQuery.SetField(field)
@@ -400,7 +400,7 @@ func (s *HTTPServer) groupByAny(w http.ResponseWriter, req *http.Request, q quer
 
 		err := s.Searcher.Query(startAt, endAt, searchRequest,
 			func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
-				results[entry.Term] = resp.Total
+				results = append(results, map[string]interface{}{"name": entry.Term, "count": resp.Total})
 				return nil
 			})
 
