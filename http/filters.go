@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,7 +17,6 @@ import (
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
-	"github.com/runner-mei/borm"
 )
 
 var ErrBucketNotFound = errors.New("bucket isn't found")
@@ -118,19 +119,54 @@ func (q *Query) Create() []query.Query {
 	return queries
 }
 
-func (h *HTTPServer) ListFilters(w http.ResponseWriter, r *http.Request) {
-	var rs []Query
-	err := h.DB.ForEach(func(it *borm.Iterator) error {
-		for it.Next() {
-			var q Query
-			if err := it.Read(&q); err != nil {
-				return err
-			}
-			q.ID = string(it.Key())
-			rs = append(rs, q)
+func (h *Server) ListFilters(w http.ResponseWriter, r *http.Request) {
+	files, err := ioutil.ReadDir(h.dataPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
 		}
-		return nil
-	})
+	}
+	var rs []Query
+	for _, file := range files {
+		var q Query
+		if err := readFromFile(filepath.Join(h.dataPath, file.Name()), &q); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		q.ID = strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
+		rs = append(rs, q)
+	}
+	w.WriteHeader(http.StatusOK)
+	encodeJSON(w, rs)
+}
+
+func (h *Server) ListFilterIDs(w http.ResponseWriter, r *http.Request) {
+	files, err := ioutil.ReadDir(h.dataPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+	}
+
+	var rs []Query
+	for _, file := range files {
+		var q Query
+		if err := readFromFile(filepath.Join(h.dataPath, file.Name()), &q); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+		q.ID = strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
+		q.Filters = nil
+		rs = append(rs, q)
+	}
+
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -140,33 +176,9 @@ func (h *HTTPServer) ListFilters(w http.ResponseWriter, r *http.Request) {
 	encodeJSON(w, rs)
 }
 
-func (h *HTTPServer) ListFilterIDs(w http.ResponseWriter, r *http.Request) {
-	var rs []Query
-	err := h.DB.ForEach(func(it *borm.Iterator) error {
-		for it.Next() {
-			var q Query
-			if err := it.Read(&q); err != nil {
-				return err
-			}
-			q.ID = string(it.Key())
-			q.Filters = nil
-			rs = append(rs, q)
-		}
-		return nil
-	})
-
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	encodeJSON(w, rs)
-}
-
-func (h *HTTPServer) ReadFilter(w http.ResponseWriter, r *http.Request, id string) {
+func (h *Server) ReadFilter(w http.ResponseWriter, r *http.Request, id string) {
 	var q Query
-	err := h.DB.Get(id, &q)
+	err := readFromFile(filepath.Join(h.dataPath, id+".json"), &q)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -176,7 +188,7 @@ func (h *HTTPServer) ReadFilter(w http.ResponseWriter, r *http.Request, id strin
 	encodeJSON(w, &q)
 }
 
-func (h *HTTPServer) CreateFilter(w http.ResponseWriter, r *http.Request) {
+func (h *Server) CreateFilter(w http.ResponseWriter, r *http.Request) {
 	bs, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -190,7 +202,7 @@ func (h *HTTPServer) CreateFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.DB.Insert(borm.GenerateID(), &q)
+	err = writeToFile(filepath.Join(h.dataPath, GenerateID()+".json"), &q)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -200,9 +212,9 @@ func (h *HTTPServer) CreateFilter(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func (h *HTTPServer) DeleteFilter(w http.ResponseWriter, r *http.Request, id string) {
-	err := h.DB.Delete(id)
-	if err != nil {
+func (h *Server) DeleteFilter(w http.ResponseWriter, r *http.Request, id string) {
+	err := os.Remove(filepath.Join(h.dataPath, id+".json"))
+	if err != nil && !os.IsNotExist(err) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 		return
@@ -211,7 +223,7 @@ func (h *HTTPServer) DeleteFilter(w http.ResponseWriter, r *http.Request, id str
 	w.Write([]byte("OK"))
 }
 
-func (h *HTTPServer) UpdateFilter(w http.ResponseWriter, r *http.Request, id string) {
+func (h *Server) UpdateFilter(w http.ResponseWriter, r *http.Request, id string) {
 	bs, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -226,7 +238,7 @@ func (h *HTTPServer) UpdateFilter(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
-	err = h.DB.Upsert(id, &q)
+	err = writeToFile(filepath.Join(h.dataPath, id+".json"), &q)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -236,11 +248,11 @@ func (h *HTTPServer) UpdateFilter(w http.ResponseWriter, r *http.Request, id str
 	w.Write([]byte("OK"))
 }
 
-func (s *HTTPServer) SummaryByFilters(w http.ResponseWriter, req *http.Request, name string) {
+func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name string) {
 	var q query.Query
 	if name != "0" {
 		var qu Query
-		if err := s.DB.Get(name, &qu); err != nil {
+		if err := readFromFile(filepath.Join(s.dataPath, name+".json"), &qu); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Bucket: " + err.Error()))
 			return
@@ -260,11 +272,11 @@ func (s *HTTPServer) SummaryByFilters(w http.ResponseWriter, req *http.Request, 
 	})
 }
 
-func (s *HTTPServer) SearchByFilters(w http.ResponseWriter, req *http.Request, name string) {
+func (s *Server) SearchByFilters(w http.ResponseWriter, req *http.Request, name string) {
 	var q query.Query
 	if name != "0" {
 		var qu Query
-		if err := s.DB.Get(name, &qu); err != nil {
+		if err := readFromFile(filepath.Join(s.dataPath, name+".json"), &qu); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Bucket: " + err.Error()))
 			return
@@ -284,7 +296,7 @@ func (s *HTTPServer) SearchByFilters(w http.ResponseWriter, req *http.Request, n
 	})
 }
 
-func (s *HTTPServer) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Request) {
+func (s *Server) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Request) {
 	var qu Query
 	if err := decodeJSON(req, &qu); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -299,7 +311,7 @@ func (s *HTTPServer) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Req
 	})
 }
 
-func (s *HTTPServer) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request) {
+func (s *Server) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request) {
 	var qu Query
 	if err := decodeJSON(req, &qu); err != nil {
 		s.RenderText(w, req, http.StatusBadRequest, err.Error())
@@ -319,7 +331,7 @@ func (s *HTTPServer) SearchByFiltersInBody(w http.ResponseWriter, req *http.Requ
 	})
 }
 
-func (s *HTTPServer) groupBy(w http.ResponseWriter, req *http.Request, q query.Query, params url.Values, groupBy string) {
+func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query, params url.Values, groupBy string) {
 	var start, end time.Time
 
 	startAt := params.Get("start_at")
@@ -375,7 +387,7 @@ func (s *HTTPServer) groupBy(w http.ResponseWriter, req *http.Request, q query.Q
 
 const maxInt32 = 2147483647
 
-func (s *HTTPServer) groupByAny(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field string) {
+func (s *Server) groupByAny(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field string) {
 	dict, err := s.Searcher.FieldDict(startAt, endAt, field)
 	if err != nil {
 		s.RenderText(w, req, http.StatusBadRequest, "read field dictionary fail,"+err.Error())
@@ -414,7 +426,7 @@ func (s *HTTPServer) groupByAny(w http.ResponseWriter, req *http.Request, q quer
 	encodeJSON(w, results)
 }
 
-func (s *HTTPServer) groupByTimestamp(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field, value string) {
+func (s *Server) groupByTimestamp(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field, value string) {
 	facetRequest, err := s.facetByTime(startAt, endAt, field, value)
 	if err != nil {
 		s.RenderText(w, req, http.StatusBadRequest, err.Error())
@@ -475,7 +487,7 @@ func (s *HTTPServer) groupByTimestamp(w http.ResponseWriter, req *http.Request, 
 	}
 }
 
-func (s *HTTPServer) facetByTime(startAt, endAt time.Time, field, value string) (*bleve.FacetRequest, error) {
+func (s *Server) facetByTime(startAt, endAt time.Time, field, value string) (*bleve.FacetRequest, error) {
 	duration, err := time.ParseDuration(value)
 	if err != nil {
 		return nil, errors.New("`" + value + "' is invalid in 'group by'.")

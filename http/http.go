@@ -16,7 +16,6 @@ import (
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/ekanite/ekanite"
 	"github.com/labstack/echo"
-	"github.com/runner-mei/borm"
 )
 
 var (
@@ -82,31 +81,53 @@ func decodeJSON(req *http.Request, i interface{}) error {
 	return decoder.Decode(i)
 }
 
-// HTTPServer serves query client connections.
-type HTTPServer struct {
+func readFromFile(file string, value interface{}) error {
+	in, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	decoder := json.NewDecoder(in)
+	return decoder.Decode(value)
+}
+
+func writeToFile(file string, value interface{}) error {
+	out, err := os.Create(file)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	decoder := json.NewEncoder(out)
+	return decoder.Encode(value)
+}
+
+// Server serves query client connections.
+type Server struct {
 	addr      string
 	urlPrefix string
 	Searcher  ekanite.Searcher
-	DB        *borm.Bucket
+	dataPath  string
 
 	NoRoute http.Handler
 	//engine *echo.Echo
 	Logger *log.Logger
 }
 
-// NewHTTPServer returns a new Server instance.
-func NewHTTPServer(addr, urlPrefix string, searcher ekanite.Searcher, db *borm.Bucket) *HTTPServer {
-	return &HTTPServer{
+// NewServer returns a new Server instance.
+func NewServer(addr, urlPrefix string, searcher ekanite.Searcher, dataPath string) *Server {
+	return &Server{
 		addr:      addr,
 		urlPrefix: urlPrefix,
 		Searcher:  searcher,
-		DB:        db,
+		dataPath:  dataPath,
 		Logger:    log.New(os.Stderr, "[httpserver] ", log.LstdFlags),
 	}
 }
 
 // Start instructs the Server to bind to the interface and accept connections.
-func (s *HTTPServer) Start() error {
+func (s *Server) Start() error {
 	return http.ListenAndServe(s.addr, s)
 }
 
@@ -128,7 +149,7 @@ func SplitURLPath(pa string) (string, string) {
 }
 
 // ServeHTTP implements a http.Handler, serving the query interface for Ekanite
-func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if o := recover(); o != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -234,19 +255,19 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *HTTPServer) RenderText(w http.ResponseWriter, req *http.Request, code int, txt string) error {
+func (s *Server) RenderText(w http.ResponseWriter, req *http.Request, code int, txt string) error {
 	w.WriteHeader(code)
 	_, e := w.Write([]byte(txt))
 	return e
 }
 
-func (s *HTTPServer) Summary(w http.ResponseWriter, req *http.Request) {
+func (s *Server) Summary(w http.ResponseWriter, req *http.Request) {
 	s.Search(w, req, false, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		return encodeJSON(w, resp.Total)
 	})
 }
 
-func (s *HTTPServer) Get(w http.ResponseWriter, req *http.Request) {
+func (s *Server) Get(w http.ResponseWriter, req *http.Request) {
 	s.Search(w, req, true, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		var documents = make([]interface{}, 0, resp.Hits.Len())
 		for _, doc := range resp.Hits {
@@ -256,7 +277,7 @@ func (s *HTTPServer) Get(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
-func (s *HTTPServer) FieldDict(w http.ResponseWriter, req *http.Request, field string) {
+func (s *Server) FieldDict(w http.ResponseWriter, req *http.Request, field string) {
 	s.timeRange(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
 		entries, err := s.Searcher.FieldDict(start, end, field)
 		if err != nil {
@@ -269,7 +290,7 @@ func (s *HTTPServer) FieldDict(w http.ResponseWriter, req *http.Request, field s
 	})
 }
 
-func (s *HTTPServer) Fields(w http.ResponseWriter, req *http.Request) {
+func (s *Server) Fields(w http.ResponseWriter, req *http.Request) {
 	s.timeRange(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
 		fields, err := s.Searcher.Fields(start, end)
 		if err != nil {
@@ -282,7 +303,7 @@ func (s *HTTPServer) Fields(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
-func (s *HTTPServer) timeRange(w http.ResponseWriter, req *http.Request,
+func (s *Server) timeRange(w http.ResponseWriter, req *http.Request,
 	cb func(w http.ResponseWriter, req *http.Request, start, end time.Time)) {
 	queryParams := req.URL.Query()
 
@@ -308,7 +329,7 @@ func (s *HTTPServer) timeRange(w http.ResponseWriter, req *http.Request,
 	cb(w, req, start, end)
 }
 
-func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, allFields bool, cb func(req *bleve.SearchRequest, resp *bleve.SearchResult) error) {
+func (s *Server) Search(w http.ResponseWriter, req *http.Request, allFields bool, cb func(req *bleve.SearchRequest, resp *bleve.SearchResult) error) {
 	var searchRequest *bleve.SearchRequest
 	if req.Method == "GET" {
 		queryParams := req.URL.Query()
@@ -342,7 +363,7 @@ func (s *HTTPServer) Search(w http.ResponseWriter, req *http.Request, allFields 
 	s.SearchIn(w, req, searchRequest, cb)
 }
 
-func (s *HTTPServer) SearchIn(w http.ResponseWriter, req *http.Request, searchRequest *bleve.SearchRequest, cb func(req *bleve.SearchRequest, resp *bleve.SearchResult) error) {
+func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchRequest *bleve.SearchRequest, cb func(req *bleve.SearchRequest, resp *bleve.SearchResult) error) {
 	queryParams := req.URL.Query()
 
 	var start, end time.Time
@@ -445,7 +466,7 @@ func (s *HTTPServer) SearchIn(w http.ResponseWriter, req *http.Request, searchRe
 }
 
 /*
-func (s *HTTPServer) QueryHTML(w http.ResponseWriter, r *http.Request) {
+func (s *Server) QueryHTML(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" || r.Method == "HEAD" {
 		// HEAD is conveniently supported by net/http without further action
 		err := serveIndex(s, w, r)
@@ -507,7 +528,7 @@ func (s *HTTPServer) QueryHTML(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveIndex serves the plain index for the GET request and POST failovers
-func serveIndex(s *HTTPServer, w http.ResponseWriter, r *http.Request) error {
+func serveIndex(s *Server, w http.ResponseWriter, r *http.Request) error {
 	data := struct {
 		Title         string
 		Headline      string
