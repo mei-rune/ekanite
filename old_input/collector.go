@@ -36,7 +36,7 @@ type Collector interface {
 // TCPCollector represents a network collector that accepts and handler TCP connections.
 type TCPCollector struct {
 	iface  string
-	format string
+	parser *LogParser
 
 	addr      net.Addr
 	tlsConfig *tls.Config
@@ -44,7 +44,6 @@ type TCPCollector struct {
 
 // UDPCollector represents a network collector that accepts UDP packets.
 type UDPCollector struct {
-	format string
 	addr   *net.UDPAddr
 	parser *LogParser
 }
@@ -53,9 +52,7 @@ type UDPCollector struct {
 // to the given inteface on Start(). If config is non-nil, a secure Collector will
 // be returned. Secure Collectors require the protocol be TCP.
 func NewCollector(proto, iface, format string, tlsConfig *tls.Config) (Collector, error) {
-	// Verify that a parser can be instantiated. The actual parser that is used will
-	// be created by the connection handler.
-	_, err := NewLogParser(format)
+	parser, err := NewLogParser(format)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +60,7 @@ func NewCollector(proto, iface, format string, tlsConfig *tls.Config) (Collector
 	if strings.ToLower(proto) == "tcp" {
 		return &TCPCollector{
 			iface:     iface,
-			format:    format,
+			parser:    parser,
 			tlsConfig: tlsConfig,
 		}, nil
 	} else if strings.ToLower(proto) == "udp" {
@@ -72,7 +69,7 @@ func NewCollector(proto, iface, format string, tlsConfig *tls.Config) (Collector
 			return nil, err
 		}
 
-		return &UDPCollector{addr: addr, format: format}, nil
+		return &UDPCollector{addr: addr, parser: parser}, nil
 	}
 	return nil, fmt.Errorf("unsupport collector protocol")
 }
@@ -86,10 +83,11 @@ func (s *TCPCollector) Start(c chan<- ekanite.Document) error {
 	} else {
 		ln, err = tls.Listen("tcp", s.iface, s.tlsConfig)
 	}
+	s.addr = ln.Addr()
+
 	if err != nil {
 		return err
 	}
-	s.addr = ln.Addr()
 
 	go func() {
 		for {
@@ -114,11 +112,6 @@ func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- ekanite.Document
 		stats.Add("tcpConnections", -1)
 		conn.Close()
 	}()
-
-	parser, err := NewLogParser(s.format)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create TCP connection parser:%s", err.Error()))
-	}
 
 	delimiter := NewSyslogDelimiter(msgBufSize)
 	reader := bufio.NewReader(conn)
@@ -152,11 +145,10 @@ func (s *TCPCollector) handleConnection(conn net.Conn, c chan<- ekanite.Document
 		// Log line available?
 		if match {
 			stats.Add("tcpEventsRx", 1)
-
-			parser.Parse(address, bytes.NewBufferString(log).Bytes())
+			s.parser.Parse(address, bytes.NewBufferString(log).Bytes())
 			e := &Event{
-				Text:          log,
-				Parsed:        parser.Result,
+				Text:          string(s.parser.Raw),
+				Parsed:        s.parser.Result,
 				ReceptionTime: time.Now().UTC(),
 				Sequence:      atomic.AddInt64(&sequenceNumber, 1),
 				SourceIP:      address,
@@ -203,11 +195,6 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 		stats.Set("udpEventsRx", udpEventsRx)
 	}
 
-	parser, err := NewLogParser(s.format)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create UDP parser:%s", err.Error()))
-	}
-
 	go func() {
 		buf := make([]byte, msgBufSize)
 		for {
@@ -218,7 +205,7 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 			}
 			address := addr.IP.String()
 			log := bytes.TrimSpace(buf[:n])
-			parser.Parse(address, log)
+			s.parser.Parse(address, log)
 
 			e := &Event{
 				Text:          string(log),
