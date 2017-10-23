@@ -177,70 +177,29 @@ func (h *Service) Read(id string) (*Query, error) {
 }
 
 func (h *Service) Create(q Query) error {
-	bs, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	var q Query
-	if err := json.Unmarshal(bs, &q); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
-
-	err = writeToFile(filepath.Join(h.dataPath, GenerateID()+".json"), &q)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte("OK"))
+	return writeToFile(filepath.Join(h.dataPath, GenerateID()+".json"), &q)
 }
 
-func (h *Server) DeleteFilter(w http.ResponseWriter, r *http.Request, id string) {
+func (h *Server) DeleteFilter(id string) error {
 	err := os.Remove(filepath.Join(h.dataPath, id+".json"))
-	if err != nil && !os.IsNotExist(err) {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-		return
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	return nil
 }
 
-func (h *Server) UpdateFilter(w http.ResponseWriter, r *http.Request, id string) {
-	bs, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
-
-	var q Query
-	if err := json.Unmarshal(bs, &q); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
-
-	err = writeToFile(filepath.Join(h.dataPath, id+".json"), &q)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte("OK"))
+func (h *Server) UpdateFilter(id string, q Query) error {
+	return writeToFile(filepath.Join(h.dataPath, id+".json"), &q)
 }
 
-func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name string) {
+func (s *Server) SummaryByFilters(id string) {
 	var q query.Query
-	if name != "0" {
+	if id != "0" {
 		var qu Query
-		if err := readFromFile(filepath.Join(s.dataPath, name+".json"), &qu); err != nil {
+		if err := readFromFile(filepath.Join(s.dataPath, id+".json"), &qu); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Bucket: " + err.Error()))
 			return
