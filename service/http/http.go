@@ -12,60 +12,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ekanite/ekanite/service"
+
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/ekanite/ekanite"
 	"github.com/labstack/echo"
 )
 
-var (
-	timeFormats = []string{
-		"2006-01-02T15:04:05.000Z07:00",
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02T15:04:05",
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-		"2006-01-02T15:04:05.999999999 07:00",
-		"2006-01-02T15:04:05 07:00"}
-)
-
-func parseTime(s string) time.Time {
-	for _, layout := range timeFormats {
-		v, err := time.ParseInLocation(layout, s, time.Local)
-		if err == nil {
-			return v.Local()
-		}
-	}
-
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "now()") {
-		durationStr := strings.TrimSpace(strings.TrimPrefix(s, "now()"))
-		if durationStr == "" {
-			return time.Now()
-		}
-		neg := false
-		if strings.HasPrefix(durationStr, "-") {
-			neg = true
-			durationStr = strings.TrimSpace(strings.TrimPrefix(durationStr, "-"))
-		}
-
-		duration, err := time.ParseDuration(durationStr)
-		if err == nil {
-			if neg {
-				duration = -1 * duration
-			}
-			return time.Now().Add(duration)
-		}
-	}
-	return time.Time{}
-}
-
 func isConsumeJSON(r *http.Request) bool {
 	accept := r.Header.Get("Accept")
 	contentType := r.Header.Get(echo.HeaderContentType)
 	return strings.Contains(contentType, "application/json") &&
 		strings.Contains(accept, "application/json")
+}
+
+func renderJSON(w http.ResponseWriter, i interface{}) {
+	if err := encodeJSON(w, i); err != nil {
+		log.Println("[WARN]", err)
+	}
 }
 
 func encodeJSON(w http.ResponseWriter, i interface{}) error {
@@ -81,34 +46,13 @@ func decodeJSON(req *http.Request, i interface{}) error {
 	return decoder.Decode(i)
 }
 
-func readFromFile(file string, value interface{}) error {
-	in, err := os.Open(file)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	decoder := json.NewDecoder(in)
-	return decoder.Decode(value)
-}
-
-func writeToFile(file string, value interface{}) error {
-	out, err := os.Create(file)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	decoder := json.NewEncoder(out)
-	return decoder.Encode(value)
-}
-
 // Server serves query client connections.
 type Server struct {
-	addr      string
-	urlPrefix string
-	Searcher  ekanite.Searcher
-	dataPath  string
+	addr       string
+	urlPrefix  string
+	Searcher   ekanite.Searcher
+	queryStore *service.QueryStore
+	dataPath   string
 
 	NoRoute http.Handler
 	//engine *echo.Echo
@@ -311,7 +255,7 @@ func (s *Server) timeRange(w http.ResponseWriter, req *http.Request,
 
 	startAt := queryParams.Get("start_at")
 	if startAt != "" {
-		start = parseTime(startAt)
+		start = service.ParseTime(startAt)
 		if start.IsZero() {
 			http.Error(w, "start_at("+startAt+") is invalid.", http.StatusBadRequest)
 			return
@@ -319,7 +263,7 @@ func (s *Server) timeRange(w http.ResponseWriter, req *http.Request,
 	}
 
 	if endAt := queryParams.Get("end_at"); endAt != "" {
-		end = parseTime(endAt)
+		end = service.ParseTime(endAt)
 		if end.IsZero() {
 			http.Error(w, "end_at("+endAt+") is invalid.", http.StatusBadRequest)
 			return
@@ -370,7 +314,7 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 
 	startAt := queryParams.Get("start_at")
 	if startAt != "" {
-		start = parseTime(startAt)
+		start = service.ParseTime(startAt)
 		if start.IsZero() {
 			http.Error(w, "start_at("+startAt+") is invalid.", http.StatusBadRequest)
 			return
@@ -378,7 +322,7 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 	}
 
 	if endAt := queryParams.Get("end_at"); endAt != "" {
-		end = parseTime(endAt)
+		end = service.ParseTime(endAt)
 		if end.IsZero() {
 			http.Error(w, "end_at("+endAt+") is invalid.", http.StatusBadRequest)
 			return

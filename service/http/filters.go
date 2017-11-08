@@ -1,4 +1,4 @@
-package service
+package http
 
 import (
 	"encoding/json"
@@ -7,8 +7,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,192 +15,60 @@ import (
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
+	"github.com/ekanite/ekanite/service"
 )
 
-var ErrBucketNotFound = errors.New("bucket isn't found")
-
-var OpList = []string{
-	"Phrase",
-	"Prefix",
-	"Regexp",
-	"Term",
-	"Wildcard",
-	"DateRange",
-	"NumericRange",
-	"QueryString",
-}
-
-type Filter struct {
-	Field  string   `json:"field,omitempty"`
-	Op     string   `json:"op"`
-	Values []string `json:"values"`
-}
-
-func (f *Filter) Create() query.Query {
-	switch f.Op {
-	case "Phrase":
-		return bleve.NewPhraseQuery(f.Values, f.Field)
-	case "Prefix":
-		q := bleve.NewPrefixQuery(f.Values[0])
-		q.SetField(f.Field)
-		return q
-	case "Regexp":
-		q := bleve.NewRegexpQuery(f.Values[0])
-		q.SetField(f.Field)
-		return q
-	case "Term":
-		if len(f.Values) == 0 {
-			panic(errors.New("'" + f.Field + "' has invalid values"))
-		}
-		var queries []query.Query
-		for _, v := range f.Values {
-			q := bleve.NewTermQuery(v)
-			q.SetField(f.Field)
-			queries = append(queries, q)
-		}
-		return bleve.NewDisjunctionQuery(queries...)
-	case "Wildcard":
-		q := bleve.NewWildcardQuery(f.Values[0])
-		q.SetField(f.Field)
-		return q
-	case "DateRange":
-		var start, end time.Time
-		if f.Values[0] != "" {
-			start = parseTime(f.Values[0])
-			if start.IsZero() {
-				panic(errors.New("'" + f.Values[0] + "' is invalid datetime"))
-			}
-		}
-
-		if f.Values[0] != "" {
-			end = parseTime(f.Values[1])
-			if end.IsZero() {
-				panic(errors.New("'" + f.Values[1] + "' is invalid datetime"))
-			}
-		}
-		inclusive := true
-		q := bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive)
-		q.SetField(f.Field)
-		return q
-	case "NumericRange":
-		start, err := strconv.ParseFloat(f.Values[0], 64)
-		if err != nil {
-			panic(err)
-		}
-		end, err := strconv.ParseFloat(f.Values[1], 64)
-		if err != nil {
-			panic(err)
-		}
-		inclusive := true
-		q := bleve.NewNumericRangeInclusiveQuery(&start, &end, &inclusive, &inclusive)
-		q.SetField(f.Field)
-		return q
-	case "QueryString":
-		fallthrough
-	default:
-		return bleve.NewQueryStringQuery(f.Values[0])
-	}
-}
-
-type Query struct {
-	ID          string   `json:"id,omitempty"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Filters     []Filter `json:"filters,omitempty"`
-}
-
-func (q *Query) Create() []query.Query {
-	var queries = make([]query.Query, 0, len(q.Filters))
-	for _, f := range q.Filters {
-		queries = append(queries, f.Create())
-	}
-	return queries
-}
-
 func (h *Server) ListFilters(w http.ResponseWriter, r *http.Request) {
-	files, err := ioutil.ReadDir(h.dataPath)
+	rs, err := h.queryStore.List()
 	if err != nil {
-		if !os.IsNotExist(err) {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-			return
-		}
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
 	}
-	var rs []Query
-	for _, file := range files {
-		var q Query
-		if err := readFromFile(filepath.Join(h.dataPath, file.Name()), &q); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-			return
-		}
 
-		q.ID = strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-		rs = append(rs, q)
-	}
 	w.WriteHeader(http.StatusOK)
-	encodeJSON(w, rs)
+	renderJSON(w, rs)
 }
 
 func (h *Server) ListFilterIDs(w http.ResponseWriter, r *http.Request) {
-	files, err := ioutil.ReadDir(h.dataPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-			return
-		}
-	}
-
-	var rs []Query
-	for _, file := range files {
-		var q Query
-		if err := readFromFile(filepath.Join(h.dataPath, file.Name()), &q); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-			return
-		}
-		q.ID = strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-		q.Filters = nil
-		rs = append(rs, q)
-	}
-
+	rs, err := h.queryStore.IDs()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 		return
 	}
+
 	w.WriteHeader(http.StatusOK)
-	encodeJSON(w, rs)
+	renderJSON(w, rs)
 }
 
 func (h *Server) ReadFilter(w http.ResponseWriter, r *http.Request, id string) {
-	var q Query
-	err := readFromFile(filepath.Join(h.dataPath, id+".json"), &q)
+	q, err := h.queryStore.Read(id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 		return
 	}
+
 	w.WriteHeader(http.StatusOK)
-	encodeJSON(w, &q)
+	renderJSON(w, &q)
 }
 
-func (h *Server) CreateFilter(w http.ResponseWriter, r *http.Request) {
+func (s *Server) CreateFilter(w http.ResponseWriter, r *http.Request) {
 	bs, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
 		return
 	}
-	var q Query
+	var q service.Query
 	if err := json.Unmarshal(bs, &q); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
 		return
 	}
 
-	err = writeToFile(filepath.Join(h.dataPath, GenerateID()+".json"), &q)
+	err = s.queryStore.Create(q)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -213,8 +79,8 @@ func (h *Server) CreateFilter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Server) DeleteFilter(w http.ResponseWriter, r *http.Request, id string) {
-	err := os.Remove(filepath.Join(h.dataPath, id+".json"))
-	if err != nil && !os.IsNotExist(err) {
+	err := h.queryStore.Delete(id)
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 		return
@@ -223,7 +89,7 @@ func (h *Server) DeleteFilter(w http.ResponseWriter, r *http.Request, id string)
 	w.Write([]byte("OK"))
 }
 
-func (h *Server) UpdateFilter(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) UpdateFilter(w http.ResponseWriter, r *http.Request, id string) {
 	bs, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -231,14 +97,14 @@ func (h *Server) UpdateFilter(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 
-	var q Query
+	var q service.Query
 	if err := json.Unmarshal(bs, &q); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
 		return
 	}
 
-	err = writeToFile(filepath.Join(h.dataPath, id+".json"), &q)
+	err = s.queryStore.Write(id, q)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -250,9 +116,9 @@ func (h *Server) UpdateFilter(w http.ResponseWriter, r *http.Request, id string)
 
 func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name string) {
 	var q query.Query
-	if name != "0" {
-		var qu Query
-		if err := readFromFile(filepath.Join(s.dataPath, name+".json"), &qu); err != nil {
+	if name != "0" && name != "" {
+		var qu, err = s.queryStore.Read(name)
+		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Bucket: " + err.Error()))
 			return
@@ -274,9 +140,9 @@ func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name
 
 func (s *Server) SearchByFilters(w http.ResponseWriter, req *http.Request, name string) {
 	var q query.Query
-	if name != "0" {
-		var qu Query
-		if err := readFromFile(filepath.Join(s.dataPath, name+".json"), &qu); err != nil {
+	if name != "0" && name != "" {
+		var qu, err = s.queryStore.Read(name)
+		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Bucket: " + err.Error()))
 			return
@@ -297,7 +163,7 @@ func (s *Server) SearchByFilters(w http.ResponseWriter, req *http.Request, name 
 }
 
 func (s *Server) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Request) {
-	var qu Query
+	var qu service.Query
 	if err := decodeJSON(req, &qu); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
@@ -312,7 +178,7 @@ func (s *Server) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Request
 }
 
 func (s *Server) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request) {
-	var qu Query
+	var qu service.Query
 	if err := decodeJSON(req, &qu); err != nil {
 		s.RenderText(w, req, http.StatusBadRequest, err.Error())
 		return
@@ -339,7 +205,7 @@ func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query
 		s.RenderText(w, req, http.StatusBadRequest, "start_at is missing.")
 		return
 	}
-	start = parseTime(startAt)
+	start = service.ParseTime(startAt)
 	if start.IsZero() {
 		s.RenderText(w, req, http.StatusBadRequest, "start_at("+startAt+") is invalid.")
 		return
@@ -347,7 +213,7 @@ func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query
 
 	endAt := params.Get("end_at")
 	if endAt != "" {
-		end = parseTime(endAt)
+		end = service.ParseTime(endAt)
 		if end.IsZero() {
 			s.RenderText(w, req, http.StatusBadRequest, "end_at("+endAt+") is invalid.")
 			return
