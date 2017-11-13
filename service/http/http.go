@@ -51,7 +51,7 @@ type Server struct {
 	addr       string
 	urlPrefix  string
 	Searcher   ekanite.Searcher
-	queryStore *service.QueryStore
+	queryStore *service.MetaStore
 	dataPath   string
 
 	NoRoute http.Handler

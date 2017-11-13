@@ -2,10 +2,13 @@ package continuous_querier
 
 import (
 	"time"
+
+	"github.com/ekanite/ekanite"
+	"github.com/ekanite/ekanite/service"
 )
 
 type Service struct {
-	dataPath    string
+	queryStore  *service.MetaStore
 	Searcher    ekanite.Searcher
 	runInterval time.Duration
 
