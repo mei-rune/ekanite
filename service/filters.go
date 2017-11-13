@@ -13,38 +13,51 @@ import (
 	"github.com/blevesearch/bleve/search/query"
 )
 
-var ErrBucketNotFound = errors.New("bucket isn't found")
+// var ErrBucketNotFound = errors.New("bucket isn't found")
+
+const (
+	OpPhrase       = "Phrase"
+	OpPrefix       = "Prefix"
+	OpRegexp       = "Regexp"
+	OpTerm         = "Term"
+	OpWildcard     = "Wildcard"
+	OpDateRange    = "DateRange"
+	OpNumericRange = "NumericRange"
+	OpQueryString  = "QueryString"
+)
 
 var OpList = []string{
-	"Phrase",
-	"Prefix",
-	"Regexp",
-	"Term",
-	"Wildcard",
-	"DateRange",
-	"NumericRange",
-	"QueryString",
+	OpPhrase,
+	OpPrefix,
+	OpRegexp,
+	OpTerm,
+	OpWildcard,
+	OpDateRange,
+	OpNumericRange,
+	OpQueryString,
 }
 
+// Filter 过滤器
 type Filter struct {
 	Field  string   `json:"field,omitempty"`
 	Op     string   `json:"op"`
 	Values []string `json:"values"`
 }
 
-func (f *Filter) Create() query.Query {
+// ToQuery 转换 query.Query
+func (f *Filter) ToQuery() query.Query {
 	switch f.Op {
-	case "Phrase":
+	case OpPhrase:
 		return bleve.NewPhraseQuery(f.Values, f.Field)
-	case "Prefix":
+	case OpPrefix:
 		q := bleve.NewPrefixQuery(f.Values[0])
 		q.SetField(f.Field)
 		return q
-	case "Regexp":
+	case OpRegexp:
 		q := bleve.NewRegexpQuery(f.Values[0])
 		q.SetField(f.Field)
 		return q
-	case "Term":
+	case OpTerm:
 		if len(f.Values) == 0 {
 			panic(errors.New("'" + f.Field + "' has invalid values"))
 		}
@@ -55,11 +68,11 @@ func (f *Filter) Create() query.Query {
 			queries = append(queries, q)
 		}
 		return bleve.NewDisjunctionQuery(queries...)
-	case "Wildcard":
+	case OpWildcard:
 		q := bleve.NewWildcardQuery(f.Values[0])
 		q.SetField(f.Field)
 		return q
-	case "DateRange":
+	case OpDateRange:
 		var start, end time.Time
 		if f.Values[0] != "" {
 			start = ParseTime(f.Values[0])
@@ -78,7 +91,7 @@ func (f *Filter) Create() query.Query {
 		q := bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive)
 		q.SetField(f.Field)
 		return q
-	case "NumericRange":
+	case OpNumericRange:
 		start, err := strconv.ParseFloat(f.Values[0], 64)
 		if err != nil {
 			panic(err)
@@ -91,13 +104,14 @@ func (f *Filter) Create() query.Query {
 		q := bleve.NewNumericRangeInclusiveQuery(&start, &end, &inclusive, &inclusive)
 		q.SetField(f.Field)
 		return q
-	case "QueryString":
+	case OpQueryString:
 		fallthrough
 	default:
 		return bleve.NewQueryStringQuery(f.Values[0])
 	}
 }
 
+// Query 一个查询对象
 type Query struct {
 	ID          string   `json:"id,omitempty"`
 	Name        string   `json:"name"`
@@ -105,10 +119,10 @@ type Query struct {
 	Filters     []Filter `json:"filters,omitempty"`
 }
 
-func (q *Query) Create() []query.Query {
+func (q *Query) ToQueries() []query.Query {
 	var queries = make([]query.Query, 0, len(q.Filters))
 	for _, f := range q.Filters {
-		queries = append(queries, f.Create())
+		queries = append(queries, f.ToQuery())
 	}
 	return queries
 }

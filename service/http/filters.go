@@ -123,7 +123,7 @@ func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name
 			w.Write([]byte("Bucket: " + err.Error()))
 			return
 		}
-		q = bleve.NewConjunctionQuery(qu.Create()...)
+		q = bleve.NewConjunctionQuery(qu.ToQueries()...)
 	}
 
 	queryParams := req.URL.Query()
@@ -147,7 +147,7 @@ func (s *Server) SearchByFilters(w http.ResponseWriter, req *http.Request, name 
 			w.Write([]byte("Bucket: " + err.Error()))
 			return
 		}
-		q = bleve.NewConjunctionQuery(qu.Create()...)
+		q = bleve.NewConjunctionQuery(qu.ToQueries()...)
 	}
 
 	searchRequest := bleve.NewSearchRequest(q)
@@ -169,7 +169,7 @@ func (s *Server) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Request
 		w.Write([]byte(err.Error()))
 		return
 	}
-	q := bleve.NewConjunctionQuery(qu.Create()...)
+	q := bleve.NewConjunctionQuery(qu.ToQueries()...)
 
 	searchRequest := bleve.NewSearchRequest(q)
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
@@ -183,7 +183,7 @@ func (s *Server) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request)
 		s.RenderText(w, req, http.StatusBadRequest, err.Error())
 		return
 	}
-	q := bleve.NewConjunctionQuery(qu.Create()...)
+	q := bleve.NewConjunctionQuery(qu.ToQueries()...)
 
 	searchRequest := bleve.NewSearchRequest(q)
 	searchRequest.Fields = []string{"*"}
@@ -289,7 +289,7 @@ func (s *Server) groupByAny(w http.ResponseWriter, req *http.Request, q query.Qu
 		}
 	}
 
-	encodeJSON(w, results)
+	renderJSON(w, results)
 }
 
 func (s *Server) groupByTimestamp(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field, value string) {
