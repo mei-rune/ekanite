@@ -48,11 +48,11 @@ func decodeJSON(req *http.Request, i interface{}) error {
 
 // Server serves query client connections.
 type Server struct {
-	addr       string
-	urlPrefix  string
-	Searcher   ekanite.Searcher
-	queryStore *service.MetaStore
-	dataPath   string
+	addr      string
+	urlPrefix string
+	Searcher  ekanite.Searcher
+	metaStore *service.MetaStore
+	dataPath  string
 
 	NoRoute http.Handler
 	//engine *echo.Echo

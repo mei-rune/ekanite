@@ -12,8 +12,6 @@ import (
 	"github.com/blevesearch/bleve/search/query"
 )
 
-// var ErrBucketNotFound = errors.New("bucket isn't found")
-
 // 一些常量
 const (
 	OpPhrase       = "Phrase"
@@ -28,6 +26,7 @@ const (
 	QueryObject = "query.json"
 )
 
+// 一些常见错误
 var (
 	ErrRecordNotFound = errors.New("record isnot found")
 	ErrNameIsExists   = errors.New("query name is exists")
@@ -209,6 +208,15 @@ func (h *MetaStore) save() error {
 	return os.Rename(filename+".tmp", filename)
 }
 
+func (h *MetaStore) ForEach(cb func(id string, data QueryData)) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for k, v := range h.queries {
+		cb(k, v)
+	}
+}
+
 func (h *MetaStore) ListQueries() []Query {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -221,7 +229,7 @@ func (h *MetaStore) ListQueries() []Query {
 	return list
 }
 
-func (h *MetaStore) QueryIDs() ([]Query, error) {
+func (h *MetaStore) ListQueryIDs() ([]Query, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -304,8 +312,8 @@ func (h *MetaStore) ListCQ(query string) ([]ContinuousQuery, error) {
 	}
 
 	var list = make([]ContinuousQuery, 0, len(q.CQ))
-	for key, cq := range q.CQ {
-		cq.ID = key
+	for _, cq := range q.CQ {
+		//cq.ID = key
 		list = append(list, cq)
 	}
 	return list, nil
@@ -326,7 +334,7 @@ func (h *MetaStore) ReadCQ(query, id string) (ContinuousQuery, error) {
 	if !ok {
 		return ContinuousQuery{}, ErrRecordNotFound
 	}
-	cq.ID = id
+	//cq.ID = id
 	return cq, nil
 }
 

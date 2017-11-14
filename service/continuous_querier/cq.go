@@ -8,7 +8,7 @@ import (
 )
 
 type Service struct {
-	queryStore  *service.MetaStore
+	metaStore   *service.MetaStore
 	Searcher    ekanite.Searcher
 	runInterval time.Duration
 
@@ -40,5 +40,29 @@ func (s *Service) backgroundLoop() {
 
 // runContinuousQueries gets CQs from the meta store and runs them.
 func (s *Service) runContinuousQueries() {
+	var keys []string
+	var qList []service.Query
+	var cqList []service.ContinuousQuery
+	s.metaStore.ForEach(func(id string, q service.QueryData) {
+		if len(q.CQ) == 0 {
+			return
+		}
 
+		for key, cq := range q.CQ {
+			keys = append(keys, key)
+			qList = append(qList, q.Query)
+			cqList = append(cqList, cq)
+		}
+	})
+
+	for idx, key := range keys {
+		cq := &cqList[idx]
+
+		s.runContinuousQuery(key, &qList[idx],  cq)
+	}
+}
+
+// runContinuousQueries gets CQs from the meta store and runs them.
+func (s *Service) runContinuousQuery(id string, q *service.Query, cq *service.ContinuousQuery) {
+	cq.
 }

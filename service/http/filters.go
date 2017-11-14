@@ -19,19 +19,14 @@ import (
 )
 
 func (h *Server) ListFilters(w http.ResponseWriter, r *http.Request) {
-	rs, err := h.queryStore.List()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-		return
-	}
+	rs := h.metaStore.ListQueries()
 
 	w.WriteHeader(http.StatusOK)
 	renderJSON(w, rs)
 }
 
 func (h *Server) ListFilterIDs(w http.ResponseWriter, r *http.Request) {
-	rs, err := h.queryStore.IDs()
+	rs, err := h.metaStore.ListQueryIDs()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -43,7 +38,7 @@ func (h *Server) ListFilterIDs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Server) ReadFilter(w http.ResponseWriter, r *http.Request, id string) {
-	q, err := h.queryStore.Read(id)
+	q, err := h.metaStore.ReadQuery(id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -68,7 +63,7 @@ func (s *Server) CreateFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.queryStore.Create(q)
+	_, err = s.metaStore.CreateQuery(q)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -79,7 +74,7 @@ func (s *Server) CreateFilter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Server) DeleteFilter(w http.ResponseWriter, r *http.Request, id string) {
-	err := h.queryStore.Delete(id)
+	err := h.metaStore.DeleteQuery(id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -104,7 +99,7 @@ func (s *Server) UpdateFilter(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 
-	err = s.queryStore.Write(id, q)
+	err = s.metaStore.UpdateQuery(id, q)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -117,7 +112,7 @@ func (s *Server) UpdateFilter(w http.ResponseWriter, r *http.Request, id string)
 func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name string) {
 	var q query.Query
 	if name != "0" && name != "" {
-		var qu, err = s.queryStore.Read(name)
+		var qu, err = s.metaStore.ReadQuery(name)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Bucket: " + err.Error()))
@@ -141,7 +136,7 @@ func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name
 func (s *Server) SearchByFilters(w http.ResponseWriter, req *http.Request, name string) {
 	var q query.Query
 	if name != "0" && name != "" {
-		var qu, err = s.queryStore.Read(name)
+		var qu, err = s.metaStore.ReadQuery(name)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Bucket: " + err.Error()))
