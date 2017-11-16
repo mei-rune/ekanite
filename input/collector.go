@@ -46,7 +46,7 @@ type TCPCollector struct {
 type UDPCollector struct {
 	format string
 	addr   *net.UDPAddr
-	parser *LogParser
+	//parser *LogParser
 }
 
 // NewCollector returns a network collector of the specified type, that will bind
@@ -222,7 +222,7 @@ func (s *UDPCollector) Start(c chan<- ekanite.Document) error {
 
 			e := &Event{
 				Text:          string(log),
-				Parsed:        s.parser.Result,
+				Parsed:        parser.Result,
 				ReceptionTime: time.Now().UTC(),
 				Sequence:      atomic.AddInt64(&sequenceNumber, 1),
 				SourceIP:      address,
