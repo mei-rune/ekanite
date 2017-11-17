@@ -46,7 +46,6 @@ type TCPCollector struct {
 type UDPCollector struct {
 	format string
 	addr   *net.UDPAddr
-	//parser *LogParser
 }
 
 // NewCollector returns a network collector of the specified type, that will bind

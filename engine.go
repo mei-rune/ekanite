@@ -110,6 +110,11 @@ func (b *Batcher) Start(errChan chan<- error) error {
 	return nil
 }
 
+// Stop stops the batching process.
+func (b *Batcher) Stop() {
+	close(b.c)
+}
+
 // C returns the channel on the batcher to which events should be sent.
 func (b *Batcher) C() chan<- Document {
 	return b.c

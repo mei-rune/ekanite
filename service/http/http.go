@@ -50,7 +50,6 @@ func decodeJSON(req *http.Request, i interface{}) error {
 
 // Server serves query client connections.
 type Server struct {
-	addr      string
 	urlPrefix string
 	c         chan<- ekanite.Document
 	Searcher  ekanite.Searcher
@@ -62,21 +61,15 @@ type Server struct {
 }
 
 // NewServer returns a new Server instance.
-func NewServer(addr, urlPrefix string, c chan<- ekanite.Document,
+func NewServer(urlPrefix string, c chan<- ekanite.Document,
 	searcher ekanite.Searcher, metaStore *service.MetaStore) *Server {
 	return &Server{
-		addr:      addr,
 		urlPrefix: urlPrefix,
 		c:         c,
 		Searcher:  searcher,
 		metaStore: metaStore,
 		Logger:    log.New(os.Stderr, "[httpserver] ", log.LstdFlags),
 	}
-}
-
-// Start instructs the Server to bind to the interface and accept connections.
-func (s *Server) Start() error {
-	return http.ListenAndServe(s.addr, s)
 }
 
 // SplitURLPath 分隔 url path, 取出 url path 的第一部份
