@@ -134,6 +134,15 @@ type Query struct {
 func (q *Query) ToQueries() []query.Query {
 	var queries = make([]query.Query, 0, len(q.Filters))
 	for _, f := range q.Filters {
+		if len(f.Field) == 0 {
+			continue
+		}
+		if len(f.Op) == 0 {
+			continue
+		}
+		if len(f.Values) == 0 {
+			continue
+		}
 		queries = append(queries, f.ToQuery())
 	}
 	return queries
@@ -143,6 +152,10 @@ func (q *Query) ToQueries() []query.Query {
 type QueryData struct {
 	Query Query
 	CQ    map[string]ContinuousQuery `json:"continuous_queries,omitempty"`
+}
+
+func NewMetaStore(dataPath string) *MetaStore {
+	return &MetaStore{dataPath: dataPath, backupCount: 5}
 }
 
 // MetaStore 对象
@@ -211,6 +224,9 @@ func (h *MetaStore) save() error {
 func (h *MetaStore) ForEach(cb func(id string, data QueryData)) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	if h.queries == nil {
+		return
+	}
 
 	for k, v := range h.queries {
 		cb(k, v)
@@ -220,6 +236,10 @@ func (h *MetaStore) ForEach(cb func(id string, data QueryData)) {
 func (h *MetaStore) ListQueries() []Query {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
+	if h.queries == nil {
+		return nil
+	}
 
 	var list []Query
 	for k, v := range h.queries {
@@ -232,6 +252,10 @@ func (h *MetaStore) ListQueries() []Query {
 func (h *MetaStore) ListQueryIDs() ([]Query, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
+	if h.queries == nil {
+		return nil, nil
+	}
 
 	var list []Query
 	for k, v := range h.queries {
@@ -247,6 +271,10 @@ func (h *MetaStore) ReadQuery(id string) (Query, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	if h.queries == nil {
+		return Query{}, ErrRecordNotFound
+	}
+
 	q, ok := h.queries[id]
 	if !ok {
 		return Query{}, ErrRecordNotFound
@@ -258,6 +286,10 @@ func (h *MetaStore) ReadQuery(id string) (Query, error) {
 func (h *MetaStore) CreateQuery(q Query) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.queries == nil {
+		h.queries = map[string]QueryData{}
+	}
 
 	for _, v := range h.queries {
 		if v.Query.Name == q.Name {
@@ -275,13 +307,22 @@ func (h *MetaStore) CreateQuery(q Query) (string, error) {
 func (h *MetaStore) DeleteQuery(id string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	delete(h.queries, id)
-	return h.save()
+	if len(h.queries) == 0 {
+		return nil
+	}
+	if _, ok := h.queries[id]; ok {
+		delete(h.queries, id)
+		return h.save()
+	}
+	return nil
 }
 
 func (h *MetaStore) UpdateQuery(id string, q Query) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if len(h.queries) == 0 {
+		return ErrRecordNotFound
+	}
 
 	old, ok := h.queries[id]
 	if !ok {
@@ -303,6 +344,10 @@ func (h *MetaStore) ListCQ(query string) ([]ContinuousQuery, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	if len(h.queries) == 0 {
+		return nil, ErrRecordNotFound
+	}
+
 	q, ok := h.queries[query]
 	if !ok {
 		return nil, ErrRecordNotFound
@@ -323,6 +368,10 @@ func (h *MetaStore) ReadCQ(query, id string) (ContinuousQuery, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	if len(h.queries) == 0 {
+		return ContinuousQuery{}, ErrRecordNotFound
+	}
+
 	q, ok := h.queries[query]
 	if !ok {
 		return ContinuousQuery{}, ErrRecordNotFound
@@ -342,6 +391,10 @@ func (h *MetaStore) CreateCQ(query string, cq ContinuousQuery) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	if len(h.queries) == 0 {
+		return "", ErrRecordNotFound
+	}
+
 	q, ok := h.queries[query]
 	if !ok {
 		return "", ErrRecordNotFound
@@ -359,6 +412,11 @@ func (h *MetaStore) CreateCQ(query string, cq ContinuousQuery) (string, error) {
 func (h *MetaStore) DeleteCQ(query, id string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if len(h.queries) == 0 {
+		return ErrRecordNotFound
+	}
+
 	q, ok := h.queries[query]
 	if !ok {
 		return ErrRecordNotFound
@@ -374,6 +432,11 @@ func (h *MetaStore) DeleteCQ(query, id string) error {
 func (h *MetaStore) UpdateCQ(query, id string, cq ContinuousQuery) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if len(h.queries) == 0 {
+		return ErrRecordNotFound
+	}
+
 	q, ok := h.queries[query]
 	if !ok {
 		return ErrRecordNotFound

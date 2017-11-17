@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ekanite/ekanite/input"
 	"github.com/ekanite/ekanite/service"
 
 	"github.com/blevesearch/bleve"
@@ -50,9 +52,9 @@ func decodeJSON(req *http.Request, i interface{}) error {
 type Server struct {
 	addr      string
 	urlPrefix string
+	c         chan<- ekanite.Document
 	Searcher  ekanite.Searcher
 	metaStore *service.MetaStore
-	dataPath  string
 
 	NoRoute http.Handler
 	//engine *echo.Echo
@@ -60,12 +62,14 @@ type Server struct {
 }
 
 // NewServer returns a new Server instance.
-func NewServer(addr, urlPrefix string, searcher ekanite.Searcher, dataPath string) *Server {
+func NewServer(addr, urlPrefix string, c chan<- ekanite.Document,
+	searcher ekanite.Searcher, metaStore *service.MetaStore) *Server {
 	return &Server{
 		addr:      addr,
 		urlPrefix: urlPrefix,
+		c:         c,
 		Searcher:  searcher,
-		dataPath:  dataPath,
+		metaStore: metaStore,
 		Logger:    log.New(os.Stderr, "[httpserver] ", log.LstdFlags),
 	}
 }
@@ -179,6 +183,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+
+	case "syslogs":
+		if r.Method == "POST" || r.Method == "PUT" {
+			s.RecvSyslogs(w, r)
+			return
+		}
 	case "raw":
 		switch pa {
 		case "count":
@@ -203,6 +213,44 @@ func (s *Server) RenderText(w http.ResponseWriter, req *http.Request, code int, 
 	w.WriteHeader(code)
 	_, e := w.Write([]byte(txt))
 	return e
+}
+
+func (s *Server) RecvSyslogs(w http.ResponseWriter, req *http.Request) {
+	bs, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("read http body: %v", err), http.StatusInternalServerError)
+		return
+	}
+	bs = bytes.TrimSpace(bs)
+	if len(bs) == 0 {
+		http.Error(w, "http body is empty", http.StatusInternalServerError)
+		return
+	}
+	if bytes.HasPrefix(bs, []byte("[")) {
+		var events []input.Event
+		err := json.Unmarshal(bs, &events)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("%v\r\n%s", err, bs), http.StatusInternalServerError)
+			return
+		}
+		for idx := range events {
+			s.c <- &events[idx]
+		}
+		return
+	}
+
+	if bytes.HasPrefix(bs, []byte("{")) {
+		var evt input.Event
+		err := json.Unmarshal(bs, &evt)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("%v\r\n%s", err, bs), http.StatusInternalServerError)
+			return
+		}
+		s.c <- &evt
+		return
+	}
+
+	http.Error(w, fmt.Sprintf("http body is invalid event(s)\r\n%s", bs), http.StatusInternalServerError)
 }
 
 func (s *Server) Summary(w http.ResponseWriter, req *http.Request) {
