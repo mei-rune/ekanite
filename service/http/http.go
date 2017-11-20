@@ -229,6 +229,8 @@ func (s *Server) RecvSyslogs(w http.ResponseWriter, req *http.Request) {
 		for idx := range events {
 			s.c <- &events[idx]
 		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
 		return
 	}
 
@@ -239,7 +241,10 @@ func (s *Server) RecvSyslogs(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, fmt.Sprintf("%v\r\n%s", err, bs), http.StatusInternalServerError)
 			return
 		}
+
 		s.c <- &evt
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
 		return
 	}
 
@@ -431,7 +436,7 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 	// 	searchRequest.Fields = []string{"*"}
 	// }
 	bs, _ := json.Marshal(searchRequest)
-	s.Logger.Printf("parsed request %s", string(bs))
+	s.Logger.Printf("parsed request: %s", string(bs))
 
 	// validate the query
 	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {
