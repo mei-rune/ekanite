@@ -171,7 +171,10 @@ func (h *MetaStore) Load() error {
 	filename := filepath.Join(h.dataPath, "meta.json")
 
 	if err := readFromFile(filename, &queries); err != nil {
-		return err
+		if !os.IsNotExist(err) {
+			return err
+		}
+		return nil
 	}
 
 	h.mu.Lock()
