@@ -467,6 +467,8 @@ func buildIndexMapping() (*mapping.IndexMappingImpl, error) {
 	keywordIndexed.IncludeInAll = true // XXX Move to false when using AST
 	keywordIndexed.IncludeTermVectors = false
 
+	numericIndexed := bleve.NewNumericFieldMapping()
+
 	articleMapping := bleve.NewDocumentMapping()
 
 	// Connect field mappings to fields.
@@ -474,6 +476,8 @@ func buildIndexMapping() (*mapping.IndexMappingImpl, error) {
 	articleMapping.AddFieldMappingsAt("address", keywordIndexed)
 	articleMapping.AddFieldMappingsAt("timestamp", timeJustIndexed)
 	articleMapping.AddFieldMappingsAt("reception", timeJustIndexed)
+	articleMapping.AddFieldMappingsAt("severity", numericIndexed)
+	articleMapping.AddFieldMappingsAt("facility", numericIndexed)
 
 	// Tell the index about field mappings.
 	indexMapping.DefaultMapping = articleMapping

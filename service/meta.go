@@ -51,70 +51,100 @@ type Filter struct {
 	Values []string `json:"values"`
 }
 
+type errBadArguments struct {
+	msg string
+}
+
+func (e errBadArguments) Error() string {
+	return e.msg
+}
+
+func ErrBadArguments(msg string) error {
+	return errBadArguments{msg: msg}
+}
+
 // ToQuery 转换为 query.Query
-func (f *Filter) ToQuery() query.Query {
+func (f *Filter) ToQuery() (query.Query, error) {
 	switch f.Op {
 	case OpPhrase:
-		return bleve.NewPhraseQuery(f.Values, f.Field)
+		return bleve.NewPhraseQuery(f.Values, f.Field), nil
 	case OpPrefix:
+		if f.Values[0] == "" {
+			return nil, ErrBadArguments("prefixQuery is empty")
+		}
+
 		q := bleve.NewPrefixQuery(f.Values[0])
 		q.SetField(f.Field)
-		return q
+		return q, nil
 	case OpRegexp:
+		if f.Values[0] == "" {
+			return nil, ErrBadArguments("regexpQuery is empty")
+		}
+
 		q := bleve.NewRegexpQuery(f.Values[0])
 		q.SetField(f.Field)
-		return q
+		return q, nil
 	case OpTerm:
 		if len(f.Values) == 0 {
-			panic(errors.New("'" + f.Field + "' has invalid values"))
+			return nil, errors.New("'" + f.Field + "' has invalid values")
 		}
 		var queries []query.Query
 		for _, v := range f.Values {
+			if v == "" {
+				return nil, errors.New("'" + f.Field + "' has empty value")
+			}
+
 			q := bleve.NewTermQuery(v)
 			q.SetField(f.Field)
 			queries = append(queries, q)
 		}
-		return bleve.NewDisjunctionQuery(queries...)
+		return bleve.NewDisjunctionQuery(queries...), nil
 	case OpWildcard:
+		if f.Values[0] == "" {
+			return nil, ErrBadArguments("wildcardQuery is empty")
+		}
 		q := bleve.NewWildcardQuery(f.Values[0])
 		q.SetField(f.Field)
-		return q
+		return q, nil
 	case OpDateRange:
 		var start, end time.Time
 		if f.Values[0] != "" {
 			start = ParseTime(f.Values[0])
 			if start.IsZero() {
-				panic(errors.New("'" + f.Values[0] + "' is invalid datetime"))
+				return nil, errors.New("'" + f.Values[0] + "' is invalid datetime")
 			}
 		}
 
 		if f.Values[0] != "" {
 			end = ParseTime(f.Values[1])
 			if end.IsZero() {
-				panic(errors.New("'" + f.Values[1] + "' is invalid datetime"))
+				return nil, errors.New("'" + f.Values[1] + "' is invalid datetime")
 			}
 		}
 		inclusive := true
 		q := bleve.NewDateRangeInclusiveQuery(start, end, &inclusive, &inclusive)
 		q.SetField(f.Field)
-		return q
+		return q, nil
 	case OpNumericRange:
 		start, err := strconv.ParseFloat(f.Values[0], 64)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		end, err := strconv.ParseFloat(f.Values[1], 64)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		inclusive := true
 		q := bleve.NewNumericRangeInclusiveQuery(&start, &end, &inclusive, &inclusive)
 		q.SetField(f.Field)
-		return q
+		return q, nil
 	case OpQueryString:
 		fallthrough
 	default:
-		return bleve.NewQueryStringQuery(f.Values[0])
+		if f.Values[0] == "" {
+			return nil, ErrBadArguments("query is empty")
+		}
+		return bleve.NewQueryStringQuery(f.Values[0]), nil
 	}
 }
 
@@ -143,7 +173,20 @@ func (q *Query) ToQueries() []query.Query {
 		if len(f.Values) == 0 {
 			continue
 		}
-		queries = append(queries, f.ToQuery())
+
+		if f.Values[0] == "" {
+			continue
+		}
+
+		query, err := f.ToQuery()
+		if err != nil {
+			if _, ok := err.(errBadArguments); ok {
+				continue
+			}
+			panic(err)
+		}
+
+		queries = append(queries, query)
 	}
 	return queries
 }
