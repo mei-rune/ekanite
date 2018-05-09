@@ -1,6 +1,7 @@
 package continuous_querier
 
 import (
+	"log"
 	"time"
 
 	"github.com/ekanite/ekanite"
@@ -8,12 +9,14 @@ import (
 )
 
 type Service struct {
+	Logger      *log.Logger
 	metaStore   *service.MetaStore
 	Searcher    ekanite.Searcher
 	runInterval time.Duration
 
 	// RunCh can be used by clients to signal service to run CQs.
 	runCh chan struct{}
+	stop  chan struct{}
 }
 
 // backgroundLoop runs on a go routine and periodically executes CQs.
@@ -24,15 +27,15 @@ func (s *Service) backgroundLoop() {
 	for {
 		select {
 		case <-s.stop:
-			s.Logger.Info("continuous query service terminating")
+			s.Logger.Println("continuous query service terminating")
 			return
-		case req, ok := <-s.runCh:
+		case _, ok := <-s.runCh:
 			if !ok {
-				s.Logger.Info("continuous query service terminating")
+				s.Logger.Println("continuous query service terminating")
 				return
 			}
 			s.runContinuousQueries()
-		case <-t.c:
+		case <-t.C:
 			s.runContinuousQueries()
 		}
 	}
@@ -58,11 +61,11 @@ func (s *Service) runContinuousQueries() {
 	for idx, key := range keys {
 		cq := &cqList[idx]
 
-		s.runContinuousQuery(key, &qList[idx],  cq)
+		s.runContinuousQuery(key, &qList[idx], cq)
 	}
 }
 
 // runContinuousQueries gets CQs from the meta store and runs them.
-func (s *Service) runContinuousQuery(id string, q *service.Query, cq *service.ContinuousQuery) {
-	cq.
+func (s *Service) runContinuousQuery(startTime, endTime, id string, q *service.Query, cq *service.ContinuousQuery) {
+	s.Searcher.Query(startTime, endTime, req, cb)
 }
