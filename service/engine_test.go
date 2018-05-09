@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -22,7 +21,7 @@ func tempPath() string {
 	return path
 }
 
-func newEngine(path string, numShards int, indexDuration time.Duration) *Engine {
+func newEngine(path string, numShards int, indexDuration time.Duration) *ekanite.Engine {
 	e := ekanite.NewEngine(path)
 	e.Open()
 	e.NumShards = numShards
@@ -33,28 +32,28 @@ func newEngine(path string, numShards int, indexDuration time.Duration) *Engine 
 func TestEngine_IndexMapThenSearch(t *testing.T) {
 	dataDir := tempPath()
 	defer os.RemoveAll(dataDir)
-	e := NewEngine(dataDir)
+	e := ekanite.NewEngine(dataDir)
 
-	ev1 := newMapEvent(parseTime("1982-02-05T04:43:00Z"), map[string]interface{}{
+	ev1 := newMapEvent(ParseTime("1982-02-05T04:43:00Z"), map[string]interface{}{
 		"address":  "127.0.0.1",
 		"message":  "auth password accepted for user philip",
 		"severity": 1,
 		"facility": 2,
 	})
-	ev2 := newMapEvent(parseTime("1982-02-05T04:43:01Z"), map[string]interface{}{
+	ev2 := newMapEvent(ParseTime("1982-02-05T04:43:01Z"), map[string]interface{}{
 		"address":  "192.168.1.2",
 		"message":  "auth password accepted for user root",
 		"severity": 4,
 		"facility": 2,
 	})
-	ev3 := newMapEvent(parseTime("1982-02-05T04:43:02Z"), map[string]interface{}{
+	ev3 := newMapEvent(ParseTime("1982-02-05T04:43:02Z"), map[string]interface{}{
 		"address":  "192.168.1.5",
 		"message":  "auth password accepted for user robot",
 		"severity": 6,
 		"facility": 2,
 	})
 
-	if err := e.Index([]Document{ev1, ev2, ev3}); err != nil {
+	if err := e.Index([]ekanite.Document{ev1, ev2, ev3}); err != nil {
 		t.Fatalf("failed to index events: %s", err.Error())
 	}
 	total, err := e.Total()
@@ -65,10 +64,10 @@ func TestEngine_IndexMapThenSearch(t *testing.T) {
 		t.Errorf("engine total doc count, got %d, expected 3", total)
 	}
 
-	searchIn(e, time.Time{}, time.Time{}, searchRequest*bleve.SearchRequest,
-		func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+	// searchIn(e, time.Time{}, time.Time{}, searchRequest*bleve.SearchRequest,
+	// 	func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 
-		})
+	// 	})
 
 }
 
@@ -80,8 +79,8 @@ type mapEvent struct {
 }
 
 // ID returns a unique ID for the event.
-func (e *mapEvent) ID() DocID {
-	return DocID(fmt.Sprintf("%016x%016x",
+func (e *mapEvent) ID() ekanite.DocID {
+	return ekanite.DocID(fmt.Sprintf("%016x%016x",
 		uint64(e.ReferenceTime().UnixNano()), uint64(e.Sequence)))
 }
 
@@ -97,7 +96,7 @@ func (e *mapEvent) ReferenceTime() time.Time {
 
 var sequence int64 = 0
 
-func newMapEvent(refTime time.Time, fields map[string]interface{}) Document {
+func newMapEvent(refTime time.Time, fields map[string]interface{}) ekanite.Document {
 	sequence++
 	fields["reception"] = refTime
 	return &mapEvent{
@@ -129,8 +128,8 @@ func searchIn(searcher ekanite.Searcher, start, end time.Time, searchRequest *bl
 		searchRequest.Query = timeQuery
 	}
 
-	bs, _ := json.Marshal(searchRequest)
-	s.Logger.Printf("parsed request: %s", string(bs))
+	//bs, _ := json.Marshal(searchRequest)
+	//fmt.Printf("parsed request: %s\r\n", string(bs))
 
 	// validate the query
 	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {

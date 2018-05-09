@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/blevesearch/bleve"
+	"github.com/ekanite/ekanite/service"
 )
+
+var parseTime = service.ParseTime
 
 type TestIndexer struct {
 	BatchesRx int
@@ -552,7 +555,7 @@ func (e *testEvent) ReferenceTime() time.Time {
 func searchString(logger *log.Logger, searcher Searcher, field, q string) (<-chan string, error) {
 	query := bleve.NewQueryStringQuery(q)
 	searchRequest := bleve.NewSearchRequest(query)
-	searchRequest.Size = maxSearchHitSize
+	searchRequest.Size = MaxSearchHitSize
 	searchRequest.Fields = []string{"*"}
 
 	// validate the query
