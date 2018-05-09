@@ -150,6 +150,15 @@ func (f *Filter) ToQuery() (query.Query, error) {
 
 // ContinuousQuery 一个持续查询对象
 type ContinuousQuery struct {
+	Fields  []string `json:"fields,omitempty"`
+	GroupBy string   `json:"groupBy,omitempty"`
+	Targets []struct {
+		Type      string   `json:"type"`
+		Arguments []string `json:"arguments"`
+	} `json:"targets,omitempty"`
+
+	//  cache for target callback
+	Callback func(cq *ContinuousQuery, value interface{}) error `json:"-"`
 }
 
 // Query 一个查询对象

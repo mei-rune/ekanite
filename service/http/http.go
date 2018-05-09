@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -62,13 +61,13 @@ type Server struct {
 
 // NewServer returns a new Server instance.
 func NewServer(urlPrefix string, c chan<- ekanite.Document,
-	searcher ekanite.Searcher, metaStore *service.MetaStore) *Server {
+	searcher ekanite.Searcher, metaStore *service.MetaStore, logger *log.Logger) *Server {
 	return &Server{
 		urlPrefix: urlPrefix,
 		c:         c,
 		Searcher:  searcher,
 		metaStore: metaStore,
-		Logger:    log.New(os.Stderr, "[httpserver] ", log.LstdFlags),
+		Logger:    logger,
 	}
 }
 
