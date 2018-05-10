@@ -136,6 +136,11 @@ func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query
 	ss := strings.Fields(groupBy)
 	switch len(ss) {
 	case 1:
+		if ss[0] == "reception" {
+			s.RenderText(w, req, http.StatusBadRequest,
+				"group by("+groupBy+") is invalid format")
+			return
+		}
 		s.groupByAny(w, req, q, start, end, groupBy)
 	case 2:
 		if ss[0] != "reception" {
