@@ -107,7 +107,10 @@ func (s *Service) runContinuousQuery(startTime, endTime time.Time, id string, qu
 	timeQuery.SetField("reception")
 
 	var q query.Query
-	if queries := qu.ToQueries(); len(queries) == 0 {
+	if queries, err := qu.ToQueries(); err != nil {
+		s.Logger.Println("load queries of cq(id="+id+") fail,", err)
+		return
+	} else if len(queries) == 0 {
 		q = timeQuery
 	} else {
 		conjunction := bleve.NewConjunctionQuery(queries...)
@@ -117,7 +120,7 @@ func (s *Service) runContinuousQuery(startTime, endTime time.Time, id string, qu
 
 	cb, err := s.createCallBack(cq)
 	if err != nil {
-		s.Logger.Println("cq(id="+id+") fail,", err)
+		s.Logger.Println("load callbacks of cq(id="+id+") fail,", err)
 		return
 	}
 

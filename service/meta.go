@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -135,6 +137,21 @@ func (f *Filter) ToQuery() (query.Query, error) {
 			return nil, err
 		}
 		inclusive := true
+		if math.IsNaN(start) || math.IsInf(start, 0) {
+			if math.IsNaN(end) || math.IsInf(end, 0) {
+				return nil, fmt.Errorf("NumericRange(%v) is invalid", f.Values)
+			}
+
+			q := bleve.NewNumericRangeInclusiveQuery(nil, &end, nil, &inclusive)
+			q.SetField(f.Field)
+			return q, nil
+		}
+		if math.IsNaN(end) || math.IsInf(end, 0) {
+			q := bleve.NewNumericRangeInclusiveQuery(&start, nil, &inclusive, nil)
+			q.SetField(f.Field)
+			return q, nil
+		}
+
 		q := bleve.NewNumericRangeInclusiveQuery(&start, &end, &inclusive, &inclusive)
 		q.SetField(f.Field)
 		return q, nil
@@ -170,7 +187,7 @@ type Query struct {
 }
 
 // ToQueries 转换为 query.Query 列表
-func (q *Query) ToQueries() []query.Query {
+func (q *Query) ToQueries() ([]query.Query, error) {
 	var queries = make([]query.Query, 0, len(q.Filters))
 	for _, f := range q.Filters {
 		if len(f.Field) == 0 {
@@ -189,15 +206,12 @@ func (q *Query) ToQueries() []query.Query {
 
 		query, err := f.ToQuery()
 		if err != nil {
-			if _, ok := err.(errBadArguments); ok {
-				continue
-			}
-			panic(err)
+			return nil, err
 		}
 
 		queries = append(queries, query)
 	}
-	return queries
+	return queries, nil
 }
 
 // QueryData Query 及相关数据的存储对象
