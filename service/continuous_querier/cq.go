@@ -76,23 +76,17 @@ func (s *Service) RunLoop(stop chan struct{}) {
 func (s *Service) runContinuousQueries(startAt, endAt time.Time) {
 	var keys []string
 	var qList []service.Query
-	var cqList []service.ContinuousQuery
-	s.metaStore.ForEach(func(id string, q service.QueryData) {
-		if len(q.CQ) == 0 {
+	s.metaStore.ForEach(func(id string, q service.Query) {
+		if len(q.ContinuousQueries) == 0 {
 			return
 		}
 
-		for key, cq := range q.CQ {
-			keys = append(keys, key)
-			qList = append(qList, q.Query)
-			cqList = append(cqList, cq)
-		}
+		keys = append(keys, id)
+		qList = append(qList, q)
 	})
 
 	for idx, key := range keys {
-		cq := &cqList[idx]
-
-		s.runContinuousQuery(startAt, endAt, key, &qList[idx], cq)
+		s.runQuery(startAt, endAt, key, &qList[idx])
 	}
 }
 
@@ -101,14 +95,14 @@ func (s *Service) isTimeField(field string) bool {
 }
 
 // runContinuousQueries gets CQs from the meta store and runs them.
-func (s *Service) runContinuousQuery(startTime, endTime time.Time, id string, qu *service.Query, cq *service.ContinuousQuery) {
+func (s *Service) runQuery(startTime, endTime time.Time, id string, qu *service.Query) {
 	inclusive := true
 	timeQuery := bleve.NewDateRangeInclusiveQuery(startTime, endTime, &inclusive, &inclusive)
 	timeQuery.SetField("reception")
 
 	var q query.Query
 	if queries, err := qu.ToQueries(); err != nil {
-		s.Logger.Println("load queries of cq(id="+id+") fail,", err)
+		s.Logger.Println("load queries of query(id="+id+") fail,", err)
 		return
 	} else if len(queries) == 0 {
 		q = timeQuery
@@ -118,23 +112,26 @@ func (s *Service) runContinuousQuery(startTime, endTime time.Time, id string, qu
 		q = conjunction
 	}
 
-	cb, err := s.createCallBack(cq)
-	if err != nil {
-		s.Logger.Println("load callbacks of cq(id="+id+") fail,", err)
-		return
-	}
+	for key, cq := range qu.ContinuousQueries {
 
-	if cq.GroupBy == "" {
-		searchRequest := bleve.NewSearchRequest(q)
-		searchRequest.Fields = cq.Fields
-		err := s.searcher.Query(startTime, endTime, searchRequest, toHandler(cq, cb))
+		cb, err := s.createCallBack(&cq)
 		if err != nil {
-			s.Logger.Println("cq(id="+id+") execute fail,", err)
+			s.Logger.Println("load callbacks of cq(query="+id+", id="+key+") fail,", err)
+			continue
 		}
-	} else {
-		err := service.GroupBy(s.searcher, startTime, endTime, q, cq.GroupBy, toGroupByHandler(cq, cb))
-		if err != nil {
-			s.Logger.Println("cq(id="+id+") execute fail,", err)
+
+		if cq.GroupBy == "" {
+			searchRequest := bleve.NewSearchRequest(q)
+			searchRequest.Fields = cq.Fields
+			err := s.searcher.Query(startTime, endTime, searchRequest, toHandler(&cq, cb))
+			if err != nil {
+				s.Logger.Println("cq(query="+id+", id="+key+") execute fail,", err)
+			}
+		} else {
+			err := service.GroupBy(s.searcher, startTime, endTime, q, cq.GroupBy, toGroupByHandler(&cq, cb))
+			if err != nil {
+				s.Logger.Println("cq(query="+id+", id="+key+") execute fail,", err)
+			}
 		}
 	}
 }

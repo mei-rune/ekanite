@@ -11,10 +11,9 @@ import (
 	"time"
 
 	"github.com/blevesearch/bleve"
-	"github.com/ekanite/ekanite/service"
 )
 
-var parseTime = service.ParseTime
+var parseTime = ParseTime
 
 type TestIndexer struct {
 	BatchesRx int

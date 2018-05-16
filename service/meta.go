@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search/query"
+	"github.com/ekanite/ekanite"
 )
 
 // 一些常量
@@ -111,14 +113,14 @@ func (f *Filter) ToQuery() (query.Query, error) {
 	case OpDateRange:
 		var start, end time.Time
 		if f.Values[0] != "" {
-			start = ParseTime(f.Values[0])
+			start = ekanite.ParseTime(f.Values[0])
 			if start.IsZero() {
 				return nil, errors.New("'" + f.Values[0] + "' is invalid datetime")
 			}
 		}
 
 		if f.Values[0] != "" {
-			end = ParseTime(f.Values[1])
+			end = ekanite.ParseTime(f.Values[1])
 			if end.IsZero() {
 				return nil, errors.New("'" + f.Values[1] + "' is invalid datetime")
 			}
@@ -180,10 +182,11 @@ type ContinuousQuery struct {
 
 // Query 一个查询对象
 type Query struct {
-	ID          string   `json:"id,omitempty"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Filters     []Filter `json:"filters,omitempty"`
+	ID                string                     `json:"id,omitempty"`
+	Name              string                     `json:"name"`
+	Description       string                     `json:"description,omitempty"`
+	Filters           []Filter                   `json:"filters,omitempty"`
+	ContinuousQueries map[string]ContinuousQuery `json:"continuous_queries,omitempty"`
 }
 
 // ToQueries 转换为 query.Query 列表
@@ -214,12 +217,6 @@ func (q *Query) ToQueries() ([]query.Query, error) {
 	return queries, nil
 }
 
-// QueryData Query 及相关数据的存储对象
-type QueryData struct {
-	Query Query
-	CQ    map[string]ContinuousQuery `json:"continuous_queries,omitempty"`
-}
-
 func NewMetaStore(dataPath string) *MetaStore {
 	return &MetaStore{dataPath: dataPath, backupCount: 5}
 }
@@ -229,11 +226,11 @@ type MetaStore struct {
 	dataPath    string
 	backupCount int
 	mu          sync.RWMutex
-	queries     map[string]QueryData
+	queries     map[string]Query
 }
 
 func (h *MetaStore) Load() error {
-	var queries map[string]QueryData
+	var queries map[string]Query
 	filename := filepath.Join(h.dataPath, "meta.json")
 
 	if err := readFromFile(filename, &queries); err != nil {
@@ -290,7 +287,7 @@ func (h *MetaStore) save() error {
 	return os.Rename(filename+".tmp", filename)
 }
 
-func (h *MetaStore) ForEach(cb func(id string, data QueryData)) {
+func (h *MetaStore) ForEach(cb func(id string, data Query)) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	if h.queries == nil {
@@ -312,8 +309,9 @@ func (h *MetaStore) ListQueries() []Query {
 
 	var list []Query
 	for k, v := range h.queries {
-		v.Query.ID = k
-		list = append(list, v.Query)
+		list = append(list, v)
+		vv := &list[len(list)-1]
+		vv.ID = k
 	}
 	return list
 }
@@ -328,10 +326,12 @@ func (h *MetaStore) ListQueryIDs() ([]Query, error) {
 
 	var list []Query
 	for k, v := range h.queries {
-		v.Query.ID = k
-		v.Query.Filters = nil
-		v.CQ = nil
-		list = append(list, v.Query)
+		list = append(list, v)
+		vv := &list[len(list)-1]
+
+		vv.ID = k
+		vv.Filters = nil
+		vv.ContinuousQueries = nil
 	}
 	return list, nil
 }
@@ -348,8 +348,8 @@ func (h *MetaStore) ReadQuery(id string) (Query, error) {
 	if !ok {
 		return Query{}, ErrRecordNotFound
 	}
-	q.Query.ID = id
-	return q.Query, nil
+	q.ID = id
+	return q, nil
 }
 
 func (h *MetaStore) CreateQuery(q Query) (string, error) {
@@ -357,19 +357,17 @@ func (h *MetaStore) CreateQuery(q Query) (string, error) {
 	defer h.mu.Unlock()
 
 	if h.queries == nil {
-		h.queries = map[string]QueryData{}
+		h.queries = map[string]Query{}
 	}
 
 	for _, v := range h.queries {
-		if v.Query.Name == q.Name {
+		if v.Name == q.Name {
 			return "", errors.New("query name is exists")
 		}
 	}
 
 	id := GenerateID()
-	h.queries[id] = QueryData{
-		Query: q,
-	}
+	h.queries[id] = q
 	return id, h.save()
 }
 
@@ -393,19 +391,19 @@ func (h *MetaStore) UpdateQuery(id string, q Query) error {
 		return ErrRecordNotFound
 	}
 
-	old, ok := h.queries[id]
+	_, ok := h.queries[id]
 	if !ok {
 		return ErrRecordNotFound
 	}
 
 	for key, v := range h.queries {
-		if v.Query.Name == q.Name && id != key {
+		if v.Name == q.Name && id != key {
 			return ErrNameIsExists
 		}
 	}
 
-	old.Query = q
-	h.queries[id] = old
+	//old = q
+	h.queries[id] = q
 	return h.save()
 }
 
@@ -421,12 +419,12 @@ func (h *MetaStore) ListCQ(query string) ([]ContinuousQuery, error) {
 	if !ok {
 		return nil, ErrRecordNotFound
 	}
-	if len(q.CQ) == 0 {
+	if len(q.ContinuousQueries) == 0 {
 		return nil, nil
 	}
 
-	var list = make([]ContinuousQuery, 0, len(q.CQ))
-	for _, cq := range q.CQ {
+	var list = make([]ContinuousQuery, 0, len(q.ContinuousQueries))
+	for _, cq := range q.ContinuousQueries {
 		//cq.ID = key
 		list = append(list, cq)
 	}
@@ -445,10 +443,10 @@ func (h *MetaStore) ReadCQ(query, id string) (ContinuousQuery, error) {
 	if !ok {
 		return ContinuousQuery{}, ErrRecordNotFound
 	}
-	if q.CQ == nil {
+	if q.ContinuousQueries == nil {
 		return ContinuousQuery{}, ErrRecordNotFound
 	}
-	cq, ok := q.CQ[id]
+	cq, ok := q.ContinuousQueries[id]
 	if !ok {
 		return ContinuousQuery{}, ErrRecordNotFound
 	}
@@ -468,12 +466,12 @@ func (h *MetaStore) CreateCQ(query string, cq ContinuousQuery) (string, error) {
 	if !ok {
 		return "", ErrRecordNotFound
 	}
-	if q.CQ == nil {
-		q.CQ = map[string]ContinuousQuery{}
+	if q.ContinuousQueries == nil {
+		q.ContinuousQueries = map[string]ContinuousQuery{}
 	}
 
 	id := GenerateID()
-	q.CQ[id] = cq
+	q.ContinuousQueries[id] = cq
 	h.queries[id] = q
 	return id, h.save()
 }
@@ -490,10 +488,10 @@ func (h *MetaStore) DeleteCQ(query, id string) error {
 	if !ok {
 		return ErrRecordNotFound
 	}
-	if q.CQ == nil {
+	if q.ContinuousQueries == nil {
 		return nil
 	}
-	delete(q.CQ, id)
+	delete(q.ContinuousQueries, id)
 	h.queries[query] = q
 	return h.save()
 }
@@ -510,14 +508,36 @@ func (h *MetaStore) UpdateCQ(query, id string, cq ContinuousQuery) error {
 	if !ok {
 		return ErrRecordNotFound
 	}
-	if q.CQ == nil {
+	if q.ContinuousQueries == nil {
 		return ErrRecordNotFound
 	}
 
-	if _, ok := q.CQ[id]; !ok {
+	if _, ok := q.ContinuousQueries[id]; !ok {
 		return ErrRecordNotFound
 	}
-	q.CQ[id] = cq
+	q.ContinuousQueries[id] = cq
 	h.queries[query] = q
 	return h.save()
+}
+
+func readFromFile(file string, value interface{}) error {
+	in, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer ekanite.CloseWith(in)
+
+	decoder := json.NewDecoder(in)
+	return decoder.Decode(value)
+}
+
+func writeToFile(file string, value interface{}) error {
+	out, err := os.Create(file)
+	if err != nil {
+		return err
+	}
+	defer ekanite.CloseWith(out)
+
+	decoder := json.NewEncoder(out)
+	return decoder.Encode(value)
 }

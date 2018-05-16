@@ -1,12 +1,10 @@
-package service
+package ekanite
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"math"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,7 +13,6 @@ import (
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
-	"github.com/ekanite/ekanite"
 )
 
 var (
@@ -61,35 +58,13 @@ func ParseTime(s string) time.Time {
 	return time.Time{}
 }
 
-func readFromFile(file string, value interface{}) error {
-	in, err := os.Open(file)
-	if err != nil {
-		return err
-	}
-	defer CloseWith(in)
-
-	decoder := json.NewDecoder(in)
-	return decoder.Decode(value)
-}
-
-func writeToFile(file string, value interface{}) error {
-	out, err := os.Create(file)
-	if err != nil {
-		return err
-	}
-	defer CloseWith(out)
-
-	decoder := json.NewEncoder(out)
-	return decoder.Encode(value)
-}
-
 func CloseWith(closer io.Closer) {
 	if err := closer.Close(); err != nil {
 		log.Println("[WARN] ", err)
 	}
 }
 
-func GroupBy(seacher ekanite.Searcher, startAt, endAt time.Time, q query.Query, field string,
+func GroupBy(seacher Searcher, startAt, endAt time.Time, q query.Query, field string,
 	cb func(map[string]uint64) error) error {
 	dict, err := seacher.FieldDict(startAt, endAt, field)
 	if err != nil {
@@ -123,7 +98,7 @@ func GroupBy(seacher ekanite.Searcher, startAt, endAt time.Time, q query.Query, 
 	return cb(stats)
 }
 
-func GroupByTime(seacher ekanite.Searcher, startAt, endAt time.Time, q query.Query, field string, value time.Duration,
+func GroupByTime(seacher Searcher, startAt, endAt time.Time, q query.Query, field string, value time.Duration,
 	cb func(req *bleve.SearchRequest, resp *bleve.SearchResult, results []*search.DateRangeFacet) error) error {
 	facetRequest, err := facetByTime(startAt, endAt, field, value)
 	if err != nil {

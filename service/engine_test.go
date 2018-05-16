@@ -12,6 +12,8 @@ import (
 	"github.com/ekanite/ekanite"
 )
 
+var ParseTime = ekanite.ParseTime
+
 // tempPath provides a path for temporary use.
 func tempPath() string {
 	f, _ := ioutil.TempFile("", "ekanite_")
