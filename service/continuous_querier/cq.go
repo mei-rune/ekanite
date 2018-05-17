@@ -44,7 +44,7 @@ func (s *Service) RunLoop(stop chan struct{}) {
 	t := time.NewTicker(s.runInterval)
 	defer t.Stop()
 
-	lastAt := service.AlignTime(time.Now(), s.runInterval)
+	lastAt := ekanite.AlignTime(time.Now(), s.runInterval)
 	s.Logger.Println("cq last is", lastAt, ", interval is", s.runInterval)
 	for {
 		select {
@@ -128,7 +128,7 @@ func (s *Service) runQuery(startTime, endTime time.Time, id string, qu *service.
 				s.Logger.Println("cq(query="+id+", id="+key+") execute fail,", err)
 			}
 		} else {
-			err := service.GroupBy(s.searcher, startTime, endTime, q, cq.GroupBy, toGroupByHandler(&cq, cb))
+			err := ekanite.GroupBy(s.searcher, startTime, endTime, q, cq.GroupBy, toGroupByHandler(&cq, cb))
 			if err != nil {
 				s.Logger.Println("cq(query="+id+", id="+key+") execute fail,", err)
 			}

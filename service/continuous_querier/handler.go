@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/blevesearch/bleve"
+	"github.com/ekanite/ekanite"
 	"github.com/ekanite/ekanite/service"
 )
 
@@ -54,7 +55,7 @@ func (s *Service) createCallBack(cq *service.ContinuousQuery) (CQHandleFunc, err
 		if len(errList) == 0 {
 			return nil
 		}
-		return service.ErrArray(errList)
+		return ekanite.ErrArray(errList)
 	}
 	cq.Callback = cb
 	return cb, nil
