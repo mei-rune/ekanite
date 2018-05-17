@@ -10,6 +10,7 @@ import (
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
+	"github.com/ekanite/ekanite"
 	"github.com/ekanite/ekanite/service"
 )
 
@@ -134,7 +135,7 @@ func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query
 		s.RenderText(w, req, http.StatusBadRequest, "start_at is missing.")
 		return
 	}
-	start = service.ParseTime(startAt)
+	start = ekanite.ParseTime(startAt)
 	if start.IsZero() {
 		s.RenderText(w, req, http.StatusBadRequest, "start_at("+startAt+") is invalid.")
 		return
@@ -142,7 +143,7 @@ func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query
 
 	endAt := params.Get("end_at")
 	if endAt != "" {
-		end = service.ParseTime(endAt)
+		end = ekanite.ParseTime(endAt)
 		if end.IsZero() {
 			s.RenderText(w, req, http.StatusBadRequest, "end_at("+endAt+") is invalid.")
 			return
@@ -187,7 +188,7 @@ func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query
 
 func (s *Server) groupByAny(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field string) {
 	var results []map[string]interface{}
-	err := service.GroupBy(s.Searcher, startAt, endAt, q, field, func(stats map[string]uint64) error {
+	err := ekanite.GroupBy(s.Searcher, startAt, endAt, q, field, func(stats map[string]uint64) error {
 		for key, value := range stats {
 			results = append(results, map[string]interface{}{"name": key, "count": value})
 		}
@@ -210,7 +211,7 @@ func (s *Server) groupByTimestamp(w http.ResponseWriter, req *http.Request, q qu
 		return
 	}
 
-	err = service.GroupByTime(s.Searcher, startAt, endAt, q, field, duration,
+	err = ekanite.GroupByTime(s.Searcher, startAt, endAt, q, field, duration,
 		func(req *bleve.SearchRequest, resp *bleve.SearchResult, results []*search.DateRangeFacet) error {
 			return encodeJSON(w, results)
 		})

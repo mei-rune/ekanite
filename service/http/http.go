@@ -300,7 +300,7 @@ func (s *Server) timeRange(w http.ResponseWriter, req *http.Request,
 
 	startAt := queryParams.Get("start_at")
 	if startAt != "" {
-		start = service.ParseTime(startAt)
+		start = ekanite.ParseTime(startAt)
 		if start.IsZero() {
 			http.Error(w, "start_at("+startAt+") is invalid.", http.StatusBadRequest)
 			return
@@ -308,7 +308,7 @@ func (s *Server) timeRange(w http.ResponseWriter, req *http.Request,
 	}
 
 	if endAt := queryParams.Get("end_at"); endAt != "" {
-		end = service.ParseTime(endAt)
+		end = ekanite.ParseTime(endAt)
 		if end.IsZero() {
 			http.Error(w, "end_at("+endAt+") is invalid.", http.StatusBadRequest)
 			return
@@ -359,7 +359,7 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 
 	startAt := queryParams.Get("start_at")
 	if startAt != "" {
-		start = service.ParseTime(startAt)
+		start = ekanite.ParseTime(startAt)
 		if start.IsZero() {
 			http.Error(w, "start_at("+startAt+") is invalid.", http.StatusBadRequest)
 			return
@@ -367,7 +367,7 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 	}
 
 	if endAt := queryParams.Get("end_at"); endAt != "" {
-		end = service.ParseTime(endAt)
+		end = ekanite.ParseTime(endAt)
 		if end.IsZero() {
 			http.Error(w, "end_at("+endAt+") is invalid.", http.StatusBadRequest)
 			return
