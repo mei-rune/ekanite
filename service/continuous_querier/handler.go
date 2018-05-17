@@ -13,10 +13,10 @@ type CQHandleFunc func(cq *service.ContinuousQuery, value interface{}) error
 
 var (
 	factoryLock sync.Mutex
-	factory     = map[string]func(cq *service.ContinuousQuery) (CQHandleFunc, error){}
+	factory     = map[string]func(*service.ContinuousQuery, []string) (CQHandleFunc, error){}
 )
 
-func Register(typ string, create func(cq *service.ContinuousQuery) (CQHandleFunc, error)) {
+func Register(typ string, create func(*service.ContinuousQuery, []string) (CQHandleFunc, error)) {
 	factoryLock.Lock()
 	defer factoryLock.Unlock()
 	factory[typ] = create
@@ -37,7 +37,7 @@ func (s *Service) createCallBack(cq *service.ContinuousQuery) (CQHandleFunc, err
 			return nil, errors.New("target '" + cq.Targets[idx].Type + "' is unsupported")
 		}
 
-		cb, err := create(cq)
+		cb, err := create(cq, cq.Targets[idx].Arguments)
 		if err != nil {
 			return nil, err
 		}

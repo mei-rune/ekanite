@@ -123,6 +123,9 @@ func (s *Service) runQuery(startTime, endTime time.Time, id string, qu *service.
 		if cq.GroupBy == "" {
 			searchRequest := bleve.NewSearchRequest(q)
 			searchRequest.Fields = cq.Fields
+			if len(searchRequest.Fields) == 0 {
+				searchRequest.Fields = []string{"*"}
+			}
 			err := s.searcher.Query(startTime, endTime, searchRequest, toHandler(&cq, cb))
 			if err != nil {
 				s.Logger.Println("cq(query="+id+", id="+key+") execute fail,", err)
