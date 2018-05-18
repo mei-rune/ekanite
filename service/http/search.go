@@ -207,7 +207,6 @@ func (s *Server) groupByTimestamp(w http.ResponseWriter, req *http.Request, q qu
 	if err != nil {
 		s.RenderText(w, req, http.StatusBadRequest,
 			"error executing query: `"+value+"' is invalid in 'group by'")
-
 		return
 	}
 
@@ -216,8 +215,12 @@ func (s *Server) groupByTimestamp(w http.ResponseWriter, req *http.Request, q qu
 			return encodeJSON(w, results)
 		})
 	if err != nil {
-		s.RenderText(w, req, http.StatusBadRequest,
-			fmt.Sprintf("error executing query: %v", err))
+		if err == bleve.ErrorAliasEmpty {
+			encodeJSON(w, []*search.DateRangeFacet{})
+		} else {
+			s.RenderText(w, req, http.StatusBadRequest,
+				fmt.Sprintf("error executing query: %v", err))
+		}
 		return
 	}
 }

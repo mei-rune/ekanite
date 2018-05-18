@@ -270,7 +270,12 @@ func (s *Server) FieldDict(w http.ResponseWriter, req *http.Request, field strin
 	s.timeRange(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
 		entries, err := s.Searcher.FieldDict(start, end, field)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("error get field dicts: %v", err), http.StatusInternalServerError)
+
+			if err == bleve.ErrorAliasEmpty {
+				encodeJSON(w, []interface{}{})
+			} else {
+				http.Error(w, fmt.Sprintf("error get field dicts: %v", err), http.StatusInternalServerError)
+			}
 			return
 		}
 		if err := encodeJSON(w, entries); err != nil {
@@ -283,7 +288,11 @@ func (s *Server) Fields(w http.ResponseWriter, req *http.Request) {
 	s.timeRange(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
 		fields, err := s.Searcher.Fields(start, end)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("error get fields: %v", err), http.StatusInternalServerError)
+			if err == bleve.ErrorAliasEmpty {
+				encodeJSON(w, []interface{}{})
+			} else {
+				http.Error(w, fmt.Sprintf("error get fields: %v", err), http.StatusInternalServerError)
+			}
 			return
 		}
 		if err := encodeJSON(w, fields); err != nil {
@@ -453,7 +462,11 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 	// execute the query
 	err = s.Searcher.Query(start, end, searchRequest, cb)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("error executing query: %v", err), http.StatusInternalServerError)
+		if err == bleve.ErrorAliasEmpty {
+			http.Error(w, fmt.Sprintf("error executing query: %v", err), http.StatusNoContent)
+		} else {
+			http.Error(w, fmt.Sprintf("error executing query: %v", err), http.StatusInternalServerError)
+		}
 		return
 	}
 }

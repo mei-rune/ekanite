@@ -68,6 +68,9 @@ func GroupBy(seacher Searcher, startAt, endAt time.Time, q query.Query, field st
 	cb func(map[string]uint64) error) error {
 	dict, err := seacher.FieldDict(startAt, endAt, field)
 	if err != nil {
+		if err == bleve.ErrorAliasEmpty {
+			return cb(map[string]uint64{})
+		}
 		return errors.New("read field dictionary fail," + err.Error())
 	}
 
