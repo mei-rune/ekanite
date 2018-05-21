@@ -451,33 +451,40 @@ func buildIndexMapping() (*mapping.IndexMappingImpl, error) {
 
 	// Create field-specific mappings.
 
-	simpleJustIndexed := bleve.NewTextFieldMapping()
-	simpleJustIndexed.Store = true
-	simpleJustIndexed.IncludeInAll = true // XXX Move to false when using AST
-	simpleJustIndexed.IncludeTermVectors = false
+	messageIndexed := bleve.NewTextFieldMapping()
+	messageIndexed.Store = true
+	messageIndexed.IncludeInAll = true // XXX Move to false when using AST
+	messageIndexed.IncludeTermVectors = false
 
-	timeJustIndexed := bleve.NewDateTimeFieldMapping()
-	timeJustIndexed.Store = true
-	timeJustIndexed.IncludeInAll = true
-	timeJustIndexed.IncludeTermVectors = false
+	receptionIndexed := bleve.NewDateTimeFieldMapping()
+	receptionIndexed.Store = true
+	receptionIndexed.IncludeInAll = true
+	receptionIndexed.IncludeTermVectors = false
 
-	keywordIndexed := bleve.NewTextFieldMapping()
-	keywordIndexed.Analyzer = keyword.Name
-	keywordIndexed.Store = true
-	keywordIndexed.IncludeInAll = true // XXX Move to false when using AST
-	keywordIndexed.IncludeTermVectors = false
+	timestampIndexed := bleve.NewDateTimeFieldMapping()
+	timestampIndexed.Store = true
+	timestampIndexed.IncludeInAll = true
+	timestampIndexed.IncludeTermVectors = false
 
-	numericIndexed := bleve.NewNumericFieldMapping()
+	addressIndexed := bleve.NewTextFieldMapping()
+	addressIndexed.Analyzer = keyword.Name
+	addressIndexed.Store = true
+	addressIndexed.IncludeInAll = true // XXX Move to false when using AST
+	addressIndexed.IncludeTermVectors = false
+
+	severityIndexed := bleve.NewNumericFieldMapping()
+
+	facilityIndexed := bleve.NewNumericFieldMapping()
 
 	articleMapping := bleve.NewDocumentMapping()
 
 	// Connect field mappings to fields.
-	articleMapping.AddFieldMappingsAt("message", simpleJustIndexed)
-	articleMapping.AddFieldMappingsAt("address", keywordIndexed)
-	articleMapping.AddFieldMappingsAt("timestamp", timeJustIndexed)
-	articleMapping.AddFieldMappingsAt("reception", timeJustIndexed)
-	articleMapping.AddFieldMappingsAt("severity", numericIndexed)
-	articleMapping.AddFieldMappingsAt("facility", numericIndexed)
+	articleMapping.AddFieldMappingsAt("address", addressIndexed)
+	articleMapping.AddFieldMappingsAt("message", messageIndexed)
+	articleMapping.AddFieldMappingsAt("timestamp", timestampIndexed)
+	articleMapping.AddFieldMappingsAt("reception", receptionIndexed)
+	articleMapping.AddFieldMappingsAt("facility", facilityIndexed)
+	articleMapping.AddFieldMappingsAt("severity", severityIndexed)
 
 	// Tell the index about field mappings.
 	indexMapping.DefaultMapping = articleMapping
