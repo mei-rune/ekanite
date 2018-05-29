@@ -14,6 +14,26 @@ import (
 	"github.com/ekanite/ekanite/service"
 )
 
+func readStringArray(params url.Values, field string, defaultValues []string) []string {
+	if sort := params["sort"]; len(sort) > 0 {
+		offset := 0
+		for idx := range sort {
+			if sort[idx] == "" {
+				continue
+			}
+
+			if idx != offset {
+				sort[offset] = sort[idx]
+			}
+			offset++
+		}
+		if offset > 0 {
+			return sort[:offset]
+		}
+	}
+
+	return defaultValues
+}
 func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name string) {
 	var q query.Query
 	if name != "0" && name != "" {
@@ -64,8 +84,10 @@ func (s *Server) SearchByFilters(w http.ResponseWriter, req *http.Request, name 
 		q = bleve.NewConjunctionQuery(queries...)
 	}
 
+	queryParams := req.URL.Query()
 	searchRequest := bleve.NewSearchRequest(q)
-	searchRequest.Fields = []string{"*"}
+	searchRequest.Fields = readStringArray(queryParams, "fields", []string{"*"})
+	searchRequest.SortBy(readStringArray(queryParams, "sort", []string{"-reception"}))
 
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		var documents = make([]interface{}, 0, resp.Hits.Len())
@@ -93,7 +115,11 @@ func (s *Server) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Request
 
 	q := bleve.NewConjunctionQuery(queries...)
 
+	queryParams := req.URL.Query()
 	searchRequest := bleve.NewSearchRequest(q)
+	searchRequest.Fields = readStringArray(queryParams, "fields", []string{"*"})
+	searchRequest.SortBy(readStringArray(queryParams, "sort", []string{"-reception"}))
+
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		return encodeJSON(w, resp.Total)
 	})
