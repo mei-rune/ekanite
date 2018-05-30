@@ -472,6 +472,12 @@ func buildIndexMapping() (*mapping.IndexMappingImpl, error) {
 	addressIndexed.IncludeInAll = true // XXX Move to false when using AST
 	addressIndexed.IncludeTermVectors = false
 
+	sourceIndexed := bleve.NewTextFieldMapping()
+	sourceIndexed.Analyzer = keyword.Name
+	sourceIndexed.Store = true
+	sourceIndexed.IncludeInAll = true // XXX Move to false when using AST
+	sourceIndexed.IncludeTermVectors = false
+
 	severityIndexed := bleve.NewNumericFieldMapping()
 
 	facilityIndexed := bleve.NewNumericFieldMapping()
@@ -480,6 +486,7 @@ func buildIndexMapping() (*mapping.IndexMappingImpl, error) {
 
 	// Connect field mappings to fields.
 	articleMapping.AddFieldMappingsAt("address", addressIndexed)
+	articleMapping.AddFieldMappingsAt("source", sourceIndexed)
 	articleMapping.AddFieldMappingsAt("message", messageIndexed)
 	articleMapping.AddFieldMappingsAt("timestamp", timestampIndexed)
 	articleMapping.AddFieldMappingsAt("reception", receptionIndexed)
