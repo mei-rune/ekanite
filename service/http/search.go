@@ -60,6 +60,7 @@ func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name
 	}
 
 	searchRequest := bleve.NewSearchRequest(q)
+	searchRequest.Fields = []string{"*"}
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		return encodeJSON(w, resp.Total)
 	})
@@ -115,7 +116,6 @@ func (s *Server) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Request
 
 	q := bleve.NewConjunctionQuery(queries...)
 
-	queryParams := req.URL.Query()
 	searchRequest := bleve.NewSearchRequest(q)
 
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
@@ -139,6 +139,7 @@ func (s *Server) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request)
 
 	q := bleve.NewConjunctionQuery(queries...)
 
+	queryParams := req.URL.Query()
 	searchRequest := bleve.NewSearchRequest(q)
 	searchRequest.Fields = readStringArray(queryParams, "fields", []string{"*"})
 	searchRequest.SortBy(readStringArray(queryParams, "sort", []string{"-reception"}))
