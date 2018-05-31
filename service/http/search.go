@@ -117,8 +117,6 @@ func (s *Server) SummaryByFiltersInBody(w http.ResponseWriter, req *http.Request
 
 	queryParams := req.URL.Query()
 	searchRequest := bleve.NewSearchRequest(q)
-	searchRequest.Fields = readStringArray(queryParams, "fields", []string{"*"})
-	searchRequest.SortBy(readStringArray(queryParams, "sort", []string{"-reception"}))
 
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		return encodeJSON(w, resp.Total)
@@ -142,7 +140,8 @@ func (s *Server) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request)
 	q := bleve.NewConjunctionQuery(queries...)
 
 	searchRequest := bleve.NewSearchRequest(q)
-	searchRequest.Fields = []string{"*"}
+	searchRequest.Fields = readStringArray(queryParams, "fields", []string{"*"})
+	searchRequest.SortBy(readStringArray(queryParams, "sort", []string{"-reception"}))
 
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		var documents = make([]interface{}, 0, resp.Hits.Len())
