@@ -373,6 +373,9 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 			http.Error(w, "start_at("+startAt+") is invalid.", http.StatusBadRequest)
 			return
 		}
+	} else {
+		year, month, day := time.Now().Date()
+		start = time.Date(year, month, day, 0, 0, 0, 0, time.Local)
 	}
 
 	if endAt := queryParams.Get("end_at"); endAt != "" {

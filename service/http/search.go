@@ -95,7 +95,7 @@ func (s *Server) SearchByFilters(w http.ResponseWriter, req *http.Request, name 
 		for _, doc := range resp.Hits {
 			documents = append(documents, doc.Fields)
 		}
-		return encodeJSON(w, documents)
+		return encodeJSON(w, map[string]interface{}{"total": resp.Total, "documents": documents})
 	})
 }
 
@@ -149,7 +149,7 @@ func (s *Server) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request)
 		for _, doc := range resp.Hits {
 			documents = append(documents, doc.Fields)
 		}
-		return encodeJSON(w, documents)
+		return encodeJSON(w, map[string]interface{}{"total": resp.Total, "documents": documents})
 	})
 }
 
