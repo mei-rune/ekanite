@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/blevesearch/bleve"
@@ -253,22 +252,25 @@ func (i *Index) Contains(t time.Time) bool {
 
 // Index indexes the slice of documents in the index. It takes care of all shard routing.
 func (i *Index) Index(documents []Document) error {
-	var wg sync.WaitGroup
 	shardBatches := make(map[*Shard][]Document, 0)
 	for _, d := range documents {
 		shard := i.Shard(d.ID())
 		shardBatches[shard] = append(shardBatches[shard], d)
 	}
 
+	var errList []error
+
 	// Index each batch in parallel.
 	for shard, batch := range shardBatches {
-		wg.Add(1)
-		go func(s *Shard, b []Document) {
-			defer wg.Done()
-			s.Index(b)
-		}(shard, batch)
+		err := shard.Index(batch)
+		if err != nil {
+			errList = append(errList, err)
+		}
 	}
-	wg.Wait()
+
+	if len(errList) != 0 {
+		return ErrArray(errList)
+	}
 	return nil
 }
 

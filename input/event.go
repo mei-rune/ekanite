@@ -2,10 +2,13 @@ package input
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/ekanite/ekanite"
 )
+
+var sequenceID int32
 
 // Event is a log message, with a reception timestamp and sequence number.
 type Event struct {
@@ -20,6 +23,9 @@ type Event struct {
 
 // ID returns a unique ID for the event.
 func (e *Event) ID() ekanite.DocID {
+	if e.Sequence == 0 {
+		e.Sequence = int64(atomic.AddInt32(&sequenceID, 1))
+	}
 	return ekanite.DocID(fmt.Sprintf("%016x%016x",
 		uint64(e.ReferenceTime().UnixNano()), uint64(e.Sequence)))
 }

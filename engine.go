@@ -391,15 +391,25 @@ func (e *Engine) Index(events []Document) error {
 		subBatches[index] = append(subBatches[index], ev)
 	}
 
+	var mu sync.Mutex
+	var errList []error
 	// Index each batch in parallel.
 	for index, subBatch := range subBatches {
 		wg.Add(1)
 		go func(i *Index, b []Document) {
 			defer wg.Done()
-			i.Index(b)
+			if err := i.Index(b); err != nil {
+				mu.Lock()
+				errList = append(errList, err)
+				mu.Unlock()
+			}
 		}(index, subBatch)
 	}
 	wg.Wait()
+
+	if len(errList) != 0 {
+		return ErrArray(errList)
+	}
 	return nil
 }
 
