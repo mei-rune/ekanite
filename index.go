@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -200,6 +202,17 @@ func OpenIndex(path string) (*Index, error) {
 		shards = append(shards, s)
 	}
 
+	if len(shards) < DefaultNumShards {
+		maxID := getMaxShardID(path)
+		for n := 0; n < (DefaultNumShards - len(shards)); n++ {
+			s := NewShard(filepath.Join(path, fmt.Sprintf("%04d", maxID+n+1)))
+			if err := s.Open(); err != nil {
+				return nil, err
+			}
+			shards = append(shards, s)
+		}
+	}
+
 	// Create alias for searching.
 	alias := bleve.NewIndexAlias()
 	for _, s := range shards {
@@ -348,7 +361,27 @@ func (s *Shard) Open() error {
 	_, err := os.Stat(s.path)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to check existence of shard")
-	} else if os.IsNotExist(err) {
+	} else if !os.IsNotExist(err) {
+
+		s.b, err = bleve.Open(s.path)
+		if err != nil {
+			for i := 0; ; i++ {
+				if i >= 100 {
+					if e := ioutil.WriteFile(s.path+".deleted", []byte("deleted"), 0666); e != nil {
+						log.Println("[ekanite]", e)
+					}
+					return fmt.Errorf("bleve open: %s", err.Error())
+				}
+
+				newPath := filepath.Join(filepath.Dir(s.path), "."+filepath.Base(s.path)+".err."+strconv.Itoa(i))
+				if e := os.Rename(s.path, newPath); e == nil {
+					break
+				}
+			}
+		}
+	}
+
+	if s.b == nil {
 		mapping, err := buildIndexMapping()
 		if err != nil {
 			return err
@@ -356,11 +389,6 @@ func (s *Shard) Open() error {
 		s.b, err = bleve.New(s.path, mapping)
 		if err != nil {
 			return fmt.Errorf("bleve new: %s", err.Error())
-		}
-	} else {
-		s.b, err = bleve.Open(s.path)
-		if err != nil {
-			return fmt.Errorf("bleve open: %s", err.Error())
 		}
 	}
 	return nil
@@ -416,13 +444,48 @@ func listShards(path string) ([]string, error) {
 	// Get the shard names in alphabetical order.
 	var names []string
 	for _, fi := range fis {
-		if !fi.IsDir() || strings.HasPrefix(fi.Name(), ".") {
+		if !fi.IsDir() || strings.HasPrefix(fi.Name(), ".") || strings.HasSuffix(fi.Name(), ".deleted") {
+			continue
+		}
+
+		found := false
+		deletedName := strings.ToLower(fi.Name() + ".deleted")
+		for idx := range fis {
+			if strings.ToLower(fis[idx].Name()) == deletedName {
+				found = true
+				break
+			}
+		}
+		if found {
 			continue
 		}
 		names = append(names, fi.Name())
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+func getMaxShardID(path string) int {
+	// Get an index directory listing.
+	d, err := os.Open(path)
+	if err != nil {
+		panic(err.Error())
+	}
+	defer d.Close()
+
+	fis, err := d.Readdir(0)
+	if err != nil {
+		panic(err)
+	}
+
+	maxID := 0
+	for _, fi := range fis {
+		id, _ := strconv.Atoi(fi.Name())
+		if maxID < id {
+			maxID = id
+		}
+	}
+	return maxID
 }
 
 func buildIndexMapping() (*mapping.IndexMappingImpl, error) {

@@ -20,7 +20,7 @@ import (
 
 // Engine defaults
 const (
-	DefaultNumShards       = 16
+	DefaultNumShards       = 4
 	DefaultIndexDuration   = 24 * time.Hour
 	DefaultRetentionPeriod = 7 * 24 * time.Hour
 
@@ -163,6 +163,7 @@ func (e *Engine) Open() error {
 	if err != nil {
 		return err
 	}
+	d.Close()
 
 	// Open all indexes.
 	for _, fi := range fis {
