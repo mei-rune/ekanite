@@ -53,14 +53,17 @@ func (s *Server) CreateFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = s.metaStore.CreateQuery(q)
+	id, err := s.metaStore.CreateQuery(q)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 		return
 	}
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte("OK"))
+	w.WriteHeader(http.StatusOK)
+	renderJSON(w, map[string]interface{}{
+		"id":   id,
+		"name": q.Name,
+	})
 }
 
 func (h *Server) DeleteFilter(w http.ResponseWriter, r *http.Request, id string) {
