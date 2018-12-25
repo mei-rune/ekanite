@@ -18,6 +18,7 @@ import (
 	"github.com/blevesearch/bleve/analysis/analyzer/custom"
 	"github.com/blevesearch/bleve/analysis/analyzer/keyword"
 	"github.com/blevesearch/bleve/analysis/tokenizer/regexp"
+	"github.com/blevesearch/bleve/index/scorch"
 	"github.com/blevesearch/bleve/mapping"
 )
 
@@ -386,7 +387,10 @@ func (s *Shard) Open() error {
 		if err != nil {
 			return err
 		}
-		s.b, err = bleve.New(s.path, mapping)
+
+		// bleve.Config.DefaultIndexType = upsidedown.Name
+		// bleve.Config.DefaultIndexType = scorch.Name
+		s.b, err = bleve.NewUsing(s.path, mapping, scorch.Name, bleve.Config.DefaultKVStore, nil)
 		if err != nil {
 			return fmt.Errorf("bleve new: %s", err.Error())
 		}
