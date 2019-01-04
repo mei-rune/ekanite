@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/blevesearch/bleve/document"
-	"github.com/blevesearch/bleve/numeric"
 )
 
 func Convert(pa string) error {
@@ -187,7 +186,7 @@ func copyShard(oldShard, newShard *Shard) error {
 				if err != nil {
 					panic(fmt.Errorf("field %s : %s", f.Name(), err))
 				}
-				value = numeric.Float64ToInt64(num)
+				value = int64(num)
 			case *document.DateTimeField:
 				t, err := field.DateTime()
 				if err != nil {
