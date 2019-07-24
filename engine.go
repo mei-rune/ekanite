@@ -34,10 +34,10 @@ var (
 
 // Searcher is the interface any object that perform searches should implement.
 type Searcher interface {
-	Query(startTime, endTime time.Time, req *bleve.SearchRequest,
+	Query(ctx context.Context, startTime, endTime time.Time, req *bleve.SearchRequest,
 		cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error
-	Fields(startTime, endTime time.Time) ([]string, error)
-	FieldDict(startTime, endTime time.Time, field string) ([]bleve_index.DictEntry, error)
+	Fields(ctx context.Context, startTime, endTime time.Time) ([]string, error)
+	FieldDict(ctx context.Context, startTime, endTime time.Time, field string) ([]bleve_index.DictEntry, error)
 }
 
 // EventIndexer is the interface a system than can index events must implement.
@@ -414,7 +414,7 @@ func (e *Engine) Index(events []Document) error {
 	return nil
 }
 
-func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error {
+func (e *Engine) Query(ctx context.Context, startTime, endTime time.Time, req *bleve.SearchRequest, cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
@@ -431,14 +431,14 @@ func (e *Engine) Query(startTime, endTime time.Time, req *bleve.SearchRequest, c
 		}
 	}
 
-	result, err := bleve.MultiSearch(context.Background(), req, indexAlias...)
+	result, err := bleve.MultiSearch(ctx, req, indexAlias...)
 	if err != nil {
 		return err
 	}
 	return cb(req, result)
 }
 
-func (e *Engine) Fields(startTime, endTime time.Time) ([]string, error) {
+func (e *Engine) Fields(ctx context.Context, startTime, endTime time.Time) ([]string, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
@@ -504,7 +504,7 @@ func (e *Engine) Fields(startTime, endTime time.Time) ([]string, error) {
 	return fields, nil
 }
 
-func (e *Engine) FieldDict(startTime, endTime time.Time, field string) ([]bleve_index.DictEntry, error) {
+func (e *Engine) FieldDict(ctx context.Context, startTime, endTime time.Time, field string) ([]bleve_index.DictEntry, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
@@ -603,7 +603,7 @@ func (e *Engine) FieldDict(startTime, endTime time.Time, field string) ([]bleve_
 }
 
 // Search performs a search.
-func (e *Engine) Search(query string) (<-chan string, error) {
+func (e *Engine) Search(ctx context.Context, query string) (<-chan string, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
@@ -649,7 +649,7 @@ func assert(condition bool, msg string, v ...interface{}) {
 	}
 }
 
-func SearchString(logger *log.Logger, searcher Searcher, q string) (<-chan string, error) {
+func SearchString(ctx context.Context, logger *log.Logger, searcher Searcher, q string) (<-chan string, error) {
 	query := bleve.NewQueryStringQuery(q)
 	searchRequest := bleve.NewSearchRequest(query)
 	searchRequest.Size = MaxSearchHitSize
@@ -666,7 +666,7 @@ func SearchString(logger *log.Logger, searcher Searcher, q string) (<-chan strin
 		defer close(c)
 
 		// execute the query
-		err := searcher.Query(time.Time{}, time.Now(), searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+		err := searcher.Query(ctx, time.Time{}, time.Now(), searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 			for _, doc := range resp.Hits {
 				// bs, err := doc.Index.GetInternal([]byte(doc.Doc.ID))
 				// if err != nil {

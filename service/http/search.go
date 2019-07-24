@@ -214,7 +214,7 @@ func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query
 
 func (s *Server) groupByAny(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field string) {
 	var results []map[string]interface{}
-	err := ekanite.GroupBy(s.Searcher, startAt, endAt, q, field, func(stats map[string]uint64) error {
+	err := ekanite.GroupBy(s.Searcher, req.Context(), startAt, endAt, q, field, func(stats map[string]uint64) error {
 		for key, value := range stats {
 			results = append(results, map[string]interface{}{"name": key, "count": value})
 		}
@@ -236,7 +236,7 @@ func (s *Server) groupByTimestamp(w http.ResponseWriter, req *http.Request, q qu
 		return
 	}
 
-	err = ekanite.GroupByTime(s.Searcher, startAt, endAt, q, field, duration,
+	err = ekanite.GroupByTime(s.Searcher, req.Context(), startAt, endAt, q, field, duration,
 		func(req *bleve.SearchRequest, resp *bleve.SearchResult, results []*search.DateRangeFacet) error {
 			return encodeJSON(w, results)
 		})

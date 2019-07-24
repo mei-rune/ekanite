@@ -1,6 +1,7 @@
 package continuous_querier
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -86,7 +87,7 @@ func (s *Service) runContinuousQueries(startAt, endAt time.Time) {
 	})
 
 	for idx, key := range keys {
-		s.runQuery(startAt, endAt, key, &qList[idx])
+		s.runQuery(context.Background(), startAt, endAt, key, &qList[idx])
 	}
 }
 
@@ -95,7 +96,7 @@ func (s *Service) isTimeField(field string) bool {
 }
 
 // runContinuousQueries gets CQs from the meta store and runs them.
-func (s *Service) runQuery(startTime, endTime time.Time, id string, qu *service.Query) {
+func (s *Service) runQuery(ctx context.Context, startTime, endTime time.Time, id string, qu *service.Query) {
 	inclusive := true
 	timeQuery := bleve.NewDateRangeInclusiveQuery(startTime, endTime, &inclusive, &inclusive)
 	timeQuery.SetField("reception")
@@ -126,12 +127,12 @@ func (s *Service) runQuery(startTime, endTime time.Time, id string, qu *service.
 			if len(searchRequest.Fields) == 0 {
 				searchRequest.Fields = []string{"*"}
 			}
-			err := s.searcher.Query(startTime, endTime, searchRequest, toHandler(&cq, cb))
+			err := s.searcher.Query(ctx, startTime, endTime, searchRequest, toHandler(&cq, cb))
 			if err != nil {
 				s.Logger.Println("cq(query="+id+", id="+key+") execute fail,", err)
 			}
 		} else {
-			err := ekanite.GroupBy(s.searcher, startTime, endTime, q, cq.GroupBy, toGroupByHandler(&cq, cb))
+			err := ekanite.GroupBy(s.searcher, ctx, startTime, endTime, q, cq.GroupBy, toGroupByHandler(&cq, cb))
 			if err != nil {
 				s.Logger.Println("cq(query="+id+", id="+key+") execute fail,", err)
 			}

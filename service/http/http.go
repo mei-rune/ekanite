@@ -268,7 +268,7 @@ func (s *Server) Get(w http.ResponseWriter, req *http.Request) {
 
 func (s *Server) FieldDict(w http.ResponseWriter, req *http.Request, field string) {
 	s.timeRange(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
-		entries, err := s.Searcher.FieldDict(start, end, field)
+		entries, err := s.Searcher.FieldDict(req.Context(), start, end, field)
 		if err != nil {
 
 			if err == bleve.ErrorAliasEmpty {
@@ -286,7 +286,7 @@ func (s *Server) FieldDict(w http.ResponseWriter, req *http.Request, field strin
 
 func (s *Server) Fields(w http.ResponseWriter, req *http.Request) {
 	s.timeRange(w, req, func(w http.ResponseWriter, req *http.Request, start, end time.Time) {
-		fields, err := s.Searcher.Fields(start, end)
+		fields, err := s.Searcher.Fields(req.Context(), start, end)
 		if err != nil {
 			if err == bleve.ErrorAliasEmpty {
 				encodeJSON(w, []interface{}{})
@@ -463,7 +463,7 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 	}
 
 	// execute the query
-	err = s.Searcher.Query(start, end, searchRequest, cb)
+	err = s.Searcher.Query(req.Context(), start, end, searchRequest, cb)
 	if err != nil {
 		if err == bleve.ErrorAliasEmpty {
 			http.Error(w, fmt.Sprintf("error executing query: %v", err), http.StatusNoContent)

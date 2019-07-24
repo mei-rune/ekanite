@@ -1,6 +1,7 @@
 package ekanite
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log"
@@ -64,9 +65,9 @@ func CloseWith(closer io.Closer) {
 	}
 }
 
-func GroupBy(seacher Searcher, startAt, endAt time.Time, q query.Query, field string,
+func GroupBy(seacher Searcher, ctx context.Context, startAt, endAt time.Time, q query.Query, field string,
 	cb func(map[string]uint64) error) error {
-	dict, err := seacher.FieldDict(startAt, endAt, field)
+	dict, err := seacher.FieldDict(ctx, startAt, endAt, field)
 	if err != nil {
 		if err == bleve.ErrorAliasEmpty {
 			return cb(map[string]uint64{})
@@ -88,7 +89,7 @@ func GroupBy(seacher Searcher, startAt, endAt time.Time, q query.Query, field st
 		termQuery.SetField(field)
 
 		searchRequest := bleve.NewSearchRequest(bleve.NewConjunctionQuery(q, termQuery))
-		err := seacher.Query(startAt, endAt, searchRequest,
+		err := seacher.Query(ctx, startAt, endAt, searchRequest,
 			func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 				stats[entry.Term] = resp.Total
 				return nil
@@ -101,7 +102,7 @@ func GroupBy(seacher Searcher, startAt, endAt time.Time, q query.Query, field st
 	return cb(stats)
 }
 
-func GroupByTime(seacher Searcher, startAt, endAt time.Time, q query.Query, field string, value time.Duration,
+func GroupByTime(seacher Searcher, ctx context.Context, startAt, endAt time.Time, q query.Query, field string, value time.Duration,
 	cb func(req *bleve.SearchRequest, resp *bleve.SearchResult, results []*search.DateRangeFacet) error) error {
 	facetRequest, err := facetByTime(startAt, endAt, field, value)
 	if err != nil {
@@ -122,7 +123,7 @@ func GroupByTime(seacher Searcher, startAt, endAt time.Time, q query.Query, fiel
 	}
 
 	// execute the query
-	return seacher.Query(startAt, endAt, searchRequest,
+	return seacher.Query(ctx, startAt, endAt, searchRequest,
 		func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 			if len(resp.Facets) == 0 {
 				return errors.New("facets is empty in the search result")
