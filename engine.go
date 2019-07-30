@@ -8,9 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -128,7 +125,7 @@ type Engine struct {
 	RetentionPeriod time.Duration // How long after Index end-time to hang onto data.
 
 	mu      sync.RWMutex
-	indexes Indexes
+	indexes IndexLoader
 
 	open bool
 	done chan struct{}
@@ -151,35 +148,9 @@ func NewEngine(path string) *Engine {
 
 // Open opens the engine.
 func (e *Engine) Open() error {
-	if err := os.MkdirAll(e.path, 0755); err != nil {
+	if err := e.indexes.Open(e.path); err != nil {
 		return err
 	}
-	d, err := os.Open(e.path)
-	if err != nil {
-		return fmt.Errorf("failed to open engine: %s", err.Error())
-	}
-
-	fis, err := d.Readdir(0)
-	if err != nil {
-		return err
-	}
-	d.Close()
-
-	// Open all indexes.
-	for _, fi := range fis {
-		if !fi.IsDir() || strings.HasPrefix(fi.Name(), ".") {
-			continue
-		}
-		indexPath := filepath.Join(e.path, fi.Name())
-		i, err := OpenIndex(indexPath)
-		if err != nil {
-			return fmt.Errorf("engine failed to open at index %s: %s", indexPath, err.Error())
-		}
-		log.Printf("engine opened index with %d shard(s) at %s", len(i.Shards), indexPath)
-		e.indexes = append(e.indexes, i)
-		sort.Sort(e.indexes)
-	}
-
 	e.wg.Add(1)
 	go e.runRetentionEnforcement()
 
@@ -193,10 +164,8 @@ func (e *Engine) Close() error {
 		return nil
 	}
 
-	for _, i := range e.indexes {
-		if err := i.Close(); err != nil {
-			return err
-		}
+	if err := e.indexes.Close(); err != nil {
+		return err
 	}
 
 	close(e.done)
@@ -208,11 +177,16 @@ func (e *Engine) Close() error {
 
 // Total returns the total number of documents indexed.
 func (e *Engine) Total() (uint64, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
 	var total uint64
-	for _, i := range e.indexes {
+	for _, li := range e.indexes.allIndexes {
+		i, err := li.load()
+		if err != nil {
+			return 0, err
+		}
+
 		t, err := i.Total()
 		if err != nil {
 			return 0, err
@@ -242,10 +216,15 @@ func (e *Engine) enforceRetention() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	filtered := e.indexes[:0]
-	for _, i := range e.indexes {
+	filtered := e.indexes.allIndexes[:0]
+	for _, i := range e.indexes.allIndexes {
 		if i.Expired(time.Now().UTC(), e.RetentionPeriod) {
-			if err := DeleteIndex(i); err != nil {
+			if err := i.Close(); err != nil {
+				e.Logger.Printf("retention enforcement failed to close index %s: %s", i.path, err.Error())
+				continue
+			}
+
+			if err := os.RemoveAll(i.path); err != nil {
 				e.Logger.Printf("retention enforcement failed to delete index %s: %s", i.path, err.Error())
 			} else {
 				e.Logger.Printf("retention enforcement deleted index %s", i.path)
@@ -255,75 +234,18 @@ func (e *Engine) enforceRetention() {
 			filtered = append(filtered, i)
 		}
 	}
-	e.indexes = filtered
+	e.indexes.allIndexes = filtered
 	return
-}
-
-// indexForReferenceTime returns an index suitable for indexing an event
-// for the given reference time. Must be called under RLock.
-func (e *Engine) indexForReferenceTime(t time.Time) *Index {
-	for _, i := range e.indexes {
-		if i.Contains(t) {
-			return i
-		}
-	}
-	return nil
-}
-
-// getIndexs get all index with a given start and end time and it must be called under lock.
-func (e *Engine) getIndexs(startTime, endTime time.Time) []*Index {
-	if startTime.IsZero() {
-		if endTime.IsZero() {
-			return e.indexes
-		}
-
-		var indexes []*Index
-		for _, idx := range e.indexes {
-			if endTime.Before(idx.startTime) {
-				continue
-			}
-			indexes = append(indexes, idx)
-		}
-		return indexes
-	} else if endTime.IsZero() {
-		var indexes []*Index
-		for _, idx := range e.indexes {
-			if startTime.After(idx.endTime) {
-				continue
-			}
-			indexes = append(indexes, idx)
-		}
-		return indexes
-	}
-
-	var indexes []*Index
-	for _, idx := range e.indexes {
-		if endTime.Before(idx.startTime) {
-			//  实际数据 -------s-----e---
-			//  情况  1  --s--e-----------
-			continue
-		}
-
-		if startTime.After(idx.endTime) {
-			//  实际数据 --s--e-------
-			//  情况  1  -------s--e--
-			continue
-		}
-
-		indexes = append(indexes, idx)
-	}
-
-	return indexes
 }
 
 // createIndex creates an index with a given start and end time and adds the
 // created index to the Engine's store. It must be called under lock.
-func (e *Engine) createIndex(startTime, endTime time.Time) (*Index, error) {
+func (e *Engine) createIndex(startTime, endTime time.Time) *LazyIndex {
 	// There cannot be two indexes with the same start time, since this would mean
 	// two indexes with the same path. So if an index already exists with the requested
 	// start time, use that index's end time as the start time.
-	var idx *Index
-	for _, i := range e.indexes {
+	var idx *LazyIndex
+	for _, i := range e.indexes.allIndexes {
 		if i.startTime == startTime {
 			idx = i
 			break
@@ -334,21 +256,16 @@ func (e *Engine) createIndex(startTime, endTime time.Time) (*Index, error) {
 		assert(!startTime.After(endTime), "new start time after end time")
 	}
 
-	i, err := NewIndex(e.path, startTime, endTime, e.NumShards)
-	if err != nil {
-		return nil, err
-	}
-	e.indexes = append(e.indexes, i)
-	sort.Sort(e.indexes)
+	i := e.indexes.newIndex(e.path, startTime, endTime, e.NumShards)
 
 	e.Logger.Printf("index %s created with %d shards, start time: %s, end time: %s",
 		i.Path(), e.NumShards, i.StartTime(), i.EndTime())
-	return i, nil
+	return i
 }
 
 // createIndexForReferenceTime creates an index suitable for indexing an event at the given
 // reference time.
-func (e *Engine) createIndexForReferenceTime(rt time.Time) (*Index, error) {
+func (e *Engine) createIndexForReferenceTime(rt time.Time) *LazyIndex {
 	start := rt.Truncate(e.IndexDuration).UTC()
 	end := start.Add(e.IndexDuration).UTC()
 	return e.createIndex(start, end)
@@ -362,10 +279,10 @@ func (e *Engine) Index(events []Document) error {
 	var wg sync.WaitGroup
 
 	// De-multiplex the batch into sub-batches, one sub-batch for each Index.
-	subBatches := make(map[*Index][]Document, 0)
+	subBatches := make(map[*LazyIndex][]Document, 0)
 
 	for _, ev := range events {
-		index := e.indexForReferenceTime(ev.ReferenceTime())
+		index := e.indexes.indexForReferenceTime(ev.ReferenceTime())
 		if index == nil {
 			func() {
 				// Take a RWLock, check again, and create a new index if necessary.
@@ -375,13 +292,12 @@ func (e *Engine) Index(events []Document) error {
 				e.mu.Lock()
 				defer e.mu.Unlock()
 
-				index = e.indexForReferenceTime(ev.ReferenceTime())
+				index = e.indexes.indexForReferenceTime(ev.ReferenceTime())
 				if index == nil {
-					var err error
-					index, err = e.createIndexForReferenceTime(ev.ReferenceTime())
-					if err != nil || index == nil {
-						panic(fmt.Sprintf("failed to create index for %s: %s", ev.ReferenceTime(), err))
-					}
+					index = e.createIndexForReferenceTime(ev.ReferenceTime())
+					// if err != nil || index == nil {
+					// 	panic(fmt.Sprintf("failed to create index for %s: %s", ev.ReferenceTime(), err))
+					// }
 				}
 			}()
 		}
@@ -395,10 +311,33 @@ func (e *Engine) Index(events []Document) error {
 	var mu sync.Mutex
 	var errList []error
 	// Index each batch in parallel.
-	for index, subBatch := range subBatches {
+	for lazyIndex, subBatch := range subBatches {
+
+		index := lazyIndex.find()
+		if index == nil {
+			i, err := func() (*Index, error) {
+				// Take a RWLock, check again, and create a new index if necessary.
+				// Doing this in a function makes lock management foolproof.
+				e.mu.RUnlock()
+				defer e.mu.RLock()
+				e.mu.Lock()
+				defer e.mu.Unlock()
+
+				return lazyIndex.load()
+			}()
+			if err != nil {
+				mu.Lock()
+				errList = append(errList, err)
+				mu.Unlock()
+				continue
+			}
+			index = i
+		}
+
 		wg.Add(1)
 		go func(i *Index, b []Document) {
 			defer wg.Done()
+
 			if err := i.Index(b); err != nil {
 				mu.Lock()
 				errList = append(errList, err)
@@ -419,7 +358,7 @@ func (e *Engine) Query(ctx context.Context, startTime, endTime time.Time, req *b
 	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
 
-	indexes := e.getIndexs(startTime, endTime)
+	indexes := e.indexes.getIndexs(startTime, endTime)
 	if len(indexes) == 0 {
 		return bleve.ErrorAliasEmpty
 	}
@@ -443,7 +382,7 @@ func (e *Engine) Fields(ctx context.Context, startTime, endTime time.Time) ([]st
 	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
 
-	indexes := e.getIndexs(startTime, endTime)
+	indexes := e.indexes.getIndexs(startTime, endTime)
 	if len(indexes) == 0 {
 		return nil, bleve.ErrorAliasEmpty
 	}
@@ -509,7 +448,7 @@ func (e *Engine) FieldDict(ctx context.Context, startTime, endTime time.Time, fi
 	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
 
-	indexes := e.getIndexs(startTime, endTime)
+	indexes := e.indexes.getIndexs(startTime, endTime)
 	if len(indexes) == 0 {
 		return nil, bleve.ErrorAliasEmpty
 	}
@@ -600,41 +539,6 @@ func (e *Engine) FieldDict(ctx context.Context, startTime, endTime time.Time, fi
 		entries = append(entries, *v)
 	}
 	return entries, nil
-}
-
-// Search performs a search.
-func (e *Engine) Search(ctx context.Context, query string) (<-chan string, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	stats.Add("queriesRx", 1)
-
-	// Buffer channel to control how many docs are sent back.
-	c := make(chan string, 1)
-
-	go func() {
-		// Sequentially search each index, starting with the earliest in time.
-		// This could be done in parallel but more sorting would be required.
-		for i := len(e.indexes) - 1; i >= 0; i-- {
-			e.Logger.Printf("searching index %s", e.indexes[i].Path())
-			ids, err := e.indexes[i].Search(query)
-			if err != nil {
-				e.Logger.Println("error performing search:", err.Error())
-				break
-			}
-			for _, id := range ids {
-				b, err := e.indexes[i].Document(id)
-				if err != nil {
-					e.Logger.Println("error getting document:", err.Error())
-					break
-				}
-				stats.Add("docsIDsRetrived", 1)
-				c <- string(b) // There is excessive byte-slice-to-strings here.
-			}
-		}
-		close(c)
-	}()
-
-	return c, nil
 }
 
 // Path returns the path to the directory of indexed data.

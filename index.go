@@ -73,6 +73,7 @@ type Document interface {
 
 // Index represents a collection of shards. It contains data for a specific time range.
 type Index struct {
+	id        int
 	path      string    // Path to shard data
 	startTime time.Time // Start-time inclusive for this index
 	endTime   time.Time // End-time exclusive for this index
@@ -98,7 +99,7 @@ func (i Indexes) Swap(u, v int) { i[u], i[v] = i[v], i[u] }
 
 // NewIndex returns an Index for the given start and end time, with the requested shards. It
 // returns an error if an index already exists at the path.
-func NewIndex(path string, startTime, endTime time.Time, numShards int) (*Index, error) {
+func NewIndex(id int, path string, startTime, endTime time.Time, numShards int) (*Index, error) {
 	indexName := startTime.UTC().Format(indexNameLayout)
 	indexPath := filepath.Join(path, indexName)
 	durationPath := filepath.Join(indexPath, endTimeFileName)
@@ -148,6 +149,7 @@ func NewIndex(path string, startTime, endTime time.Time, numShards int) (*Index,
 
 	// Index is ready to go.
 	return &Index{
+		id:        id,
 		path:      indexPath,
 		Shards:    shards,
 		Alias:     alias,
@@ -157,7 +159,7 @@ func NewIndex(path string, startTime, endTime time.Time, numShards int) (*Index,
 }
 
 // OpenIndex opens an existing index, at the given path.
-func OpenIndex(path string) (*Index, error) {
+func OpenIndex(id int, path string) (*Index, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to access index at %s", path)
@@ -222,6 +224,7 @@ func OpenIndex(path string) (*Index, error) {
 
 	// Index is ready to go.
 	return &Index{
+		id:        id,
 		path:      path,
 		Shards:    shards,
 		Alias:     alias,
