@@ -14,8 +14,13 @@ func main() {
 	var format string
 	flag.DurationVar(&delta, "delta", 0, "")
 	flag.StringVar(&format, "format", "", "")
+	flag.CommandLine.Usage = func() {
+		fmt.Println("使用方法：", os.Args[0], "日志目录")
+		fmt.Println("         ", os.Args[0], "-format=csv  日志目录")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
-	args := flag.Args()
+	args := flag.CommandLine.Args()
 
 	create := ekanite.NewShardWriter
 	if format == "csv" {
