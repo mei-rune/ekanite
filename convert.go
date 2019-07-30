@@ -7,11 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/blevesearch/bleve/document"
 )
 
-func Convert(pa string) error {
+func Convert(pa string, delta time.Duration) error {
 	fi, err := os.Stat(pa)
 	if err != nil {
 		return fmt.Errorf("failed to access index at %s: %v", pa, err)
@@ -43,7 +44,7 @@ func Convert(pa string) error {
 					continue
 				}
 
-				err := copyIndex(filepath.Join(pa, name.Name()))
+				err := copyIndex(filepath.Join(pa, name.Name()), delta)
 				if err != nil {
 					return err
 				}
@@ -53,10 +54,10 @@ func Convert(pa string) error {
 		return fmt.Errorf("failed to access index at %s: %v", pa, err)
 	}
 
-	return copyIndex(pa)
+	return copyIndex(pa, delta)
 }
 
-func copyIndex(pa string) error {
+func copyIndex(pa string, delta time.Duration) error {
 	names, err := listShards(pa)
 	if err != nil {
 		return err
@@ -86,7 +87,7 @@ func copyIndex(pa string) error {
 			return fmt.Errorf("new shard open fail: %s", err.Error())
 		}
 
-		if err := copyShard(oldShard, newShard); err != nil {
+		if err := copyShard(oldShard, newShard, delta); err != nil {
 			return fmt.Errorf("copy shard fail: %s", err.Error())
 		}
 		oldShard.Close()
@@ -98,7 +99,12 @@ func copyIndex(pa string) error {
 		return fmt.Errorf("read old endtime : %v", err)
 	}
 
-	err = ioutil.WriteFile(filepath.Join(newPath, endTimeFileName), bs, 0666)
+	tt, err := time.Parse(indexNameLayout, string(bs))
+	if err != nil {
+		return fmt.Errorf("read old endtime : %v", err)
+	}
+
+	err = ioutil.WriteFile(filepath.Join(newPath, endTimeFileName), []byte(tt.Format(indexNameLayout)), 0666)
 	if err != nil {
 		return fmt.Errorf("write new endtime : %v", err)
 	}
@@ -106,7 +112,7 @@ func copyIndex(pa string) error {
 	return nil
 }
 
-func copyShard(oldShard, newShard *Shard) error {
+func copyShard(oldShard, newShard *Shard, delta time.Duration) error {
 	i, a, err := oldShard.b.Advanced()
 	if err != nil {
 		return fmt.Errorf("Advanced : %v", err)
@@ -192,7 +198,7 @@ func copyShard(oldShard, newShard *Shard) error {
 				if err != nil {
 					panic(fmt.Errorf("field %s : %s", f.Name(), err))
 				}
-				value = t
+				value = t.Add(delta)
 			// case *document.DateTimeField:
 			// 	t, _ := field.DateTime()
 			// 	value = t
