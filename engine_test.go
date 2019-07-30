@@ -2,6 +2,7 @@ package ekanite
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -569,7 +570,7 @@ func searchString(logger *log.Logger, searcher Searcher, field, q string) (<-cha
 		defer close(c)
 
 		// execute the query
-		err := searcher.Query(time.Time{}, time.Now(), searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+		err := searcher.Query(context.Background(), time.Time{}, time.Now(), searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 			for _, doc := range resp.Hits {
 				// bs, err := doc.Index.GetInternal([]byte(doc.Doc.ID))
 				// if err != nil {

@@ -1,18 +1,21 @@
 package ekanite
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/document"
 )
 
-func Convert(pa string, delta time.Duration) error {
+func Convert(pa string, delta time.Duration, create func(pa string) (Writer, error)) error {
 	fi, err := os.Stat(pa)
 	if err != nil {
 		return fmt.Errorf("failed to access index at %s: %v", pa, err)
@@ -44,7 +47,7 @@ func Convert(pa string, delta time.Duration) error {
 					continue
 				}
 
-				err := copyIndex(filepath.Join(pa, name.Name()), delta)
+				err := copyIndex(filepath.Join(pa, name.Name()), delta, create)
 				if err != nil {
 					return err
 				}
@@ -54,10 +57,10 @@ func Convert(pa string, delta time.Duration) error {
 		return fmt.Errorf("failed to access index at %s: %v", pa, err)
 	}
 
-	return copyIndex(pa, delta)
+	return copyIndex(pa, delta, create)
 }
 
-func copyIndex(pa string, delta time.Duration) error {
+func copyIndex(pa string, delta time.Duration, create func(pa string) (Writer, error)) error {
 	names, err := listShards(pa)
 	if err != nil {
 		return err
@@ -82,8 +85,10 @@ func copyIndex(pa string, delta time.Duration) error {
 			return fmt.Errorf("old shard open fail: %s", err.Error())
 		}
 
-		newShard := NewShard(filepath.Join(newPath, name))
-		if err := newShard.Open(); err != nil {
+		//newShard := NewShard(filepath.Join(newPath, name))
+		//if err := newShard.Open(); err != nil {
+		newShard, err := create(filepath.Join(newPath, name))
+		if err != nil {
 			return fmt.Errorf("new shard open fail: %s", err.Error())
 		}
 
@@ -112,7 +117,74 @@ func copyIndex(pa string, delta time.Duration) error {
 	return nil
 }
 
-func copyShard(oldShard, newShard *Shard, delta time.Duration) error {
+func NewShardWriter(pa string) (Writer, error) {
+	newShard := NewShard(pa)
+	if err := newShard.Open(); err != nil {
+		return nil, err
+	}
+
+	return &shardWriter{
+		newShard: newShard,
+	}, nil
+}
+
+type Writer interface {
+	Output(string, *document.Document, map[string]interface{}) error
+	Close() error
+}
+
+type shardWriter struct {
+	newShard *Shard
+	batch    *bleve.Batch
+}
+
+func (sw *shardWriter) Output(id string, doc *document.Document, values map[string]interface{}) error {
+	if sw.batch == nil {
+		sw.batch = sw.newShard.b.NewBatch()
+	}
+
+	err := sw.batch.IndexAdvanced(doc)
+	if err != nil {
+		return fmt.Errorf("IndexAdvanced(%s) : %v", id, err)
+	}
+	return sw.batch.Index(id, values)
+}
+
+func (sw *shardWriter) Close() error {
+	err := sw.newShard.b.Batch(sw.batch)
+	if err != nil {
+		return fmt.Errorf("Batch : %v", err)
+	}
+	return sw.newShard.Close()
+}
+
+func NewCsvWriter(out io.Writer) (Writer, error) {
+	return &csvWriter{
+		out: csv.NewWriter(out),
+	}, nil
+}
+
+type csvWriter struct {
+	out *csv.Writer
+}
+
+func (sw *csvWriter) Output(id string, doc *document.Document, values map[string]interface{}) error {
+	return sw.out.Write([]string{
+		id,
+		fmt.Sprint(values["timestamp"]),
+		fmt.Sprint(values["reception"]),
+		fmt.Sprint(values["address"]),
+		fmt.Sprint(values["message"]),
+		fmt.Sprint(values["source"]),
+	})
+}
+
+func (sw *csvWriter) Close() error {
+	sw.out.Flush()
+	return nil
+}
+
+func copyShard(oldShard *Shard, writer Writer, delta time.Duration) error {
 	i, a, err := oldShard.b.Advanced()
 	if err != nil {
 		return fmt.Errorf("Advanced : %v", err)
@@ -154,7 +226,7 @@ func copyShard(oldShard, newShard *Shard, delta time.Duration) error {
 		docIDs = append(docIDs, idStr)
 	}
 
-	b := newShard.b.NewBatch()
+	//b := newShard.b.NewBatch()
 
 	fmt.Println("count =", len(docIDs))
 	for idx, idStr := range docIDs {
@@ -164,11 +236,6 @@ func copyShard(oldShard, newShard *Shard, delta time.Duration) error {
 		}
 		if doc == nil {
 			return fmt.Errorf("Document(%s) : empty", idStr)
-		}
-
-		err = b.IndexAdvanced(doc)
-		if err != nil {
-			return fmt.Errorf("IndexAdvanced(%s) : %v", idStr, err)
 		}
 
 		var values = map[string]interface{}{}
@@ -228,7 +295,9 @@ func copyShard(oldShard, newShard *Shard, delta time.Duration) error {
 				panic(errors.New("field '" + nm + "' is empty"))
 			}
 		}
-		err = b.Index(idStr, values)
+
+		err = writer.Output(idStr, doc, values)
+		// err = b.Index(idStr, values)
 		if err != nil {
 			return fmt.Errorf("IndexAdvanced(%d: %s) : %v", idx, idStr, err)
 		}
@@ -236,10 +305,10 @@ func copyShard(oldShard, newShard *Shard, delta time.Duration) error {
 		// fmt.Println(idStr, doc.GoString())
 	}
 
-	err = newShard.b.Batch(b)
-	if err != nil {
-		return fmt.Errorf("Batch : %v", err)
-	}
+	// err = newShard.b.Batch(b)
+	// if err != nil {
+	// 	return fmt.Errorf("Batch : %v", err)
+	// }
 
 	return nil
 }
