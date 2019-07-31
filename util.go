@@ -181,11 +181,14 @@ func facetByTime(startAt, endAt time.Time, field string, value time.Duration) (*
 type errArray []error
 
 func (ea errArray) Error() string {
+	if len(ea) == 1 {
+		return ea[0].Error()
+	}
+
 	var sb strings.Builder
+	sb.WriteString("mult error:")
 	for idx := range ea {
-		if idx > 0 {
-			sb.WriteString("\r\n\t")
-		}
+		sb.WriteString("\r\n\t")
 		sb.WriteString(ea[idx].Error())
 	}
 	return sb.String()
@@ -199,11 +202,8 @@ func ErrArray(errList []error) error {
 	return errArray(errList)
 }
 
-func AlignTime(t time.Time, interval time.Duration) time.Time {
-	unixTime := (t.Unix() / int64(interval.Seconds())) * int64(interval.Seconds())
-	now := time.Unix(unixTime, 0)
-	for now.Before(t) {
-		now = now.Add(interval)
+func closeWith(closer io.Closer) {
+	if e := closer.Close(); e != nil {
+		log.Println(e.Error())
 	}
-	return now
 }

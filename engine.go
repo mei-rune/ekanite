@@ -124,7 +124,6 @@ type Engine struct {
 	IndexDuration   time.Duration // Duration of created indexes.
 	RetentionPeriod time.Duration // How long after Index end-time to hang onto data.
 
-	mu      sync.RWMutex
 	indexes IndexLoader
 
 	open bool
@@ -175,26 +174,26 @@ func (e *Engine) Close() error {
 	return nil
 }
 
-// Total returns the total number of documents indexed.
-func (e *Engine) Total() (uint64, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+// // Total returns the total number of documents indexed.
+// func (e *Engine) Total() (uint64, error) {
+// 	var total uint64
+// 	for _, li := range e.indexes.AllIndexes() {
+// 		t, err := func() (uint64, error) {
+// 			i, err := li.load()
+// 			if err != nil {
+// 				return 0, err
+// 			}
+// 			defer closeWith(i)
 
-	var total uint64
-	for _, li := range e.indexes.allIndexes {
-		i, err := li.load()
-		if err != nil {
-			return 0, err
-		}
-
-		t, err := i.Total()
-		if err != nil {
-			return 0, err
-		}
-		total += t
-	}
-	return total, nil
-}
+// 			return i.Total()
+// 		}()
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 		total += t
+// 	}
+// 	return total, nil
+// }
 
 // runRetentionEnforcement periodically runs retention enforcement.
 func (e *Engine) runRetentionEnforcement() {
@@ -213,39 +212,38 @@ func (e *Engine) runRetentionEnforcement() {
 
 // enforceRetention removes indexes which have aged out.
 func (e *Engine) enforceRetention() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.indexes.Do(func(loader *IndexLoader, switchFunc func()) {
+		filtered := loader.allIndexes[:0]
+		for _, i := range loader.allIndexes {
+			if i.Expired(time.Now().UTC(), e.RetentionPeriod) {
+				if err := i.Close(); err != nil {
+					e.Logger.Printf("retention enforcement failed to close index %s: %s", i.path, err.Error())
+					continue
+				}
 
-	filtered := e.indexes.allIndexes[:0]
-	for _, i := range e.indexes.allIndexes {
-		if i.Expired(time.Now().UTC(), e.RetentionPeriod) {
-			if err := i.Close(); err != nil {
-				e.Logger.Printf("retention enforcement failed to close index %s: %s", i.path, err.Error())
-				continue
-			}
-
-			if err := os.RemoveAll(i.path); err != nil {
-				e.Logger.Printf("retention enforcement failed to delete index %s: %s", i.path, err.Error())
+				if err := os.RemoveAll(i.path); err != nil {
+					e.Logger.Printf("retention enforcement failed to delete index %s: %s", i.path, err.Error())
+				} else {
+					e.Logger.Printf("retention enforcement deleted index %s", i.path)
+					stats.Add("retentionEnforcementDeletions", 1)
+				}
 			} else {
-				e.Logger.Printf("retention enforcement deleted index %s", i.path)
-				stats.Add("retentionEnforcementDeletions", 1)
+				filtered = append(filtered, i)
 			}
-		} else {
-			filtered = append(filtered, i)
 		}
-	}
-	e.indexes.allIndexes = filtered
+		loader.allIndexes = filtered
+	})
 	return
 }
 
 // createIndex creates an index with a given start and end time and adds the
 // created index to the Engine's store. It must be called under lock.
-func (e *Engine) createIndex(startTime, endTime time.Time) *LazyIndex {
+func (e *Engine) createIndex(loader *IndexLoader, startTime, endTime time.Time) *LazyIndex {
 	// There cannot be two indexes with the same start time, since this would mean
 	// two indexes with the same path. So if an index already exists with the requested
 	// start time, use that index's end time as the start time.
 	var idx *LazyIndex
-	for _, i := range e.indexes.allIndexes {
+	for _, i := range loader.allIndexes {
 		if i.startTime == startTime {
 			idx = i
 			break
@@ -256,94 +254,66 @@ func (e *Engine) createIndex(startTime, endTime time.Time) *LazyIndex {
 		assert(!startTime.After(endTime), "new start time after end time")
 	}
 
-	i := e.indexes.newIndex(e.path, startTime, endTime, e.NumShards)
+	i := loader.newIndex(e.path, startTime, endTime, e.NumShards)
 
 	e.Logger.Printf("index %s created with %d shards, start time: %s, end time: %s",
 		i.Path(), e.NumShards, i.StartTime(), i.EndTime())
 	return i
 }
 
-// createIndexForReferenceTime creates an index suitable for indexing an event at the given
-// reference time.
-func (e *Engine) createIndexForReferenceTime(rt time.Time) *LazyIndex {
-	start := rt.Truncate(e.IndexDuration).UTC()
-	end := start.Add(e.IndexDuration).UTC()
-	return e.createIndex(start, end)
-}
-
 // Index indexes a batch of Events. It blocks until all processing has completed.
 func (e *Engine) Index(events []Document) error {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	var wg sync.WaitGroup
 
 	// De-multiplex the batch into sub-batches, one sub-batch for each Index.
 	subBatches := make(map[*LazyIndex][]Document, 0)
 
-	for _, ev := range events {
-		index := e.indexes.indexForReferenceTime(ev.ReferenceTime())
-		if index == nil {
-			func() {
+	e.indexes.Do(func(loader *IndexLoader, switchFunc func()) {
+		for _, ev := range events {
+			index := loader.indexForReferenceTime(ev.ReferenceTime())
+			if index == nil {
 				// Take a RWLock, check again, and create a new index if necessary.
 				// Doing this in a function makes lock management foolproof.
-				e.mu.RUnlock()
-				defer e.mu.RLock()
-				e.mu.Lock()
-				defer e.mu.Unlock()
+				switchFunc()
 
-				index = e.indexes.indexForReferenceTime(ev.ReferenceTime())
+				index = loader.indexForReferenceTime(ev.ReferenceTime())
 				if index == nil {
-					index = e.createIndexForReferenceTime(ev.ReferenceTime())
-					// if err != nil || index == nil {
-					// 	panic(fmt.Sprintf("failed to create index for %s: %s", ev.ReferenceTime(), err))
-					// }
+					start := ev.ReferenceTime().Truncate(e.IndexDuration).UTC()
+					end := start.Add(e.IndexDuration).UTC()
+					index = e.createIndex(loader, start, end)
 				}
-			}()
-		}
+			}
 
-		if _, ok := subBatches[index]; !ok {
-			subBatches[index] = make([]Document, 0)
+			if _, ok := subBatches[index]; !ok {
+				subBatches[index] = make([]Document, 0)
+			}
+			subBatches[index] = append(subBatches[index], ev)
 		}
-		subBatches[index] = append(subBatches[index], ev)
-	}
+	})
 
 	var mu sync.Mutex
 	var errList []error
 	// Index each batch in parallel.
 	for lazyIndex, subBatch := range subBatches {
+		wg.Add(1)
+		go func(li *LazyIndex, b []Document) {
+			defer wg.Done()
 
-		index := lazyIndex.find()
-		if index == nil {
-			i, err := func() (*Index, error) {
-				// Take a RWLock, check again, and create a new index if necessary.
-				// Doing this in a function makes lock management foolproof.
-				e.mu.RUnlock()
-				defer e.mu.RLock()
-				e.mu.Lock()
-				defer e.mu.Unlock()
-
-				return lazyIndex.load()
-			}()
+			i, err := lazyIndex.Load()
 			if err != nil {
 				mu.Lock()
 				errList = append(errList, err)
 				mu.Unlock()
-				continue
+				return
 			}
-			index = i
-		}
-
-		wg.Add(1)
-		go func(i *Index, b []Document) {
-			defer wg.Done()
+			defer closeWith(i)
 
 			if err := i.Index(b); err != nil {
 				mu.Lock()
 				errList = append(errList, err)
 				mu.Unlock()
 			}
-		}(index, subBatch)
+		}(lazyIndex, subBatch)
 	}
 	wg.Wait()
 
@@ -354,17 +324,21 @@ func (e *Engine) Index(events []Document) error {
 }
 
 func (e *Engine) Query(ctx context.Context, startTime, endTime time.Time, req *bleve.SearchRequest, cb func(*bleve.SearchRequest, *bleve.SearchResult) error) error {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
 
-	indexes := e.indexes.getIndexs(startTime, endTime)
+	indexes := e.indexes.GetIndexes(startTime, endTime)
 	if len(indexes) == 0 {
 		return bleve.ErrorAliasEmpty
 	}
 
 	var indexAlias = make([]bleve.Index, 0, len(indexes)*e.NumShards)
-	for _, idx := range indexes {
+	for _, i := range indexes {
+		idx, err := i.Load()
+		if err != nil {
+			return err
+		}
+		defer closeWith(idx)
+
 		for _, shard := range idx.Shards {
 			indexAlias = append(indexAlias, shard.b)
 		}
@@ -378,40 +352,44 @@ func (e *Engine) Query(ctx context.Context, startTime, endTime time.Time, req *b
 }
 
 func (e *Engine) Fields(ctx context.Context, startTime, endTime time.Time) ([]string, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
 
-	indexes := e.indexes.getIndexs(startTime, endTime)
+	indexes := e.indexes.GetIndexes(startTime, endTime)
 	if len(indexes) == 0 {
 		return nil, bleve.ErrorAliasEmpty
 	}
 
-	var indexAlias = 0
-	for _, idx := range indexes {
-		indexAlias += len(idx.Shards)
+	var indexAlias = make([]*Shard, 0, len(indexes)*e.NumShards)
+	for _, i := range indexes {
+		idx, err := i.Load()
+		if err != nil {
+			return nil, err
+		}
+		defer closeWith(idx)
+
+		for _, shard := range idx.Shards {
+			indexAlias = append(indexAlias, shard)
+		}
 	}
 
 	var wait sync.WaitGroup
 	c := make(chan struct {
 		err    error
 		fields []string
-	}, indexAlias)
+	}, len(indexAlias))
 
-	wait.Add(indexAlias)
+	wait.Add(len(indexAlias))
 
-	for _, idx := range indexes {
-		for _, shard := range idx.Shards {
-			go func(shard *Shard) {
-				defer wait.Done()
+	for _, shard := range indexAlias {
+		go func(shard *Shard) {
+			defer wait.Done()
 
-				fields, err := shard.b.Fields()
-				c <- struct {
-					err    error
-					fields []string
-				}{err: err, fields: fields}
-			}(shard)
-		}
+			fields, err := shard.b.Fields()
+			c <- struct {
+				err    error
+				fields []string
+			}{err: err, fields: fields}
+		}(shard)
 	}
 
 	wait.Wait()
@@ -444,34 +422,50 @@ func (e *Engine) Fields(ctx context.Context, startTime, endTime time.Time) ([]st
 }
 
 func (e *Engine) FieldDict(ctx context.Context, startTime, endTime time.Time, field string) ([]bleve_index.DictEntry, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
 	stats.Add("queriesRx", 1)
 
-	indexes := e.indexes.getIndexs(startTime, endTime)
+	indexes := e.indexes.GetIndexes(startTime, endTime)
 	if len(indexes) == 0 {
 		return nil, bleve.ErrorAliasEmpty
 	}
+	var indexAlias = make([]*Shard, 0, len(indexes)*e.NumShards)
+	for _, i := range indexes {
+		idx, err := i.Load()
+		if err != nil {
+			return nil, err
+		}
+		defer closeWith(idx)
 
-	var indexAlias = 0
-	for _, idx := range indexes {
-		indexAlias += len(idx.Shards)
+		for _, shard := range idx.Shards {
+			indexAlias = append(indexAlias, shard)
+		}
 	}
 
 	var wait sync.WaitGroup
 	c := make(chan struct {
 		err     error
 		entries []bleve_index.DictEntry
-	}, indexAlias)
+	}, len(indexAlias))
 
-	wait.Add(indexAlias)
+	wait.Add(len(indexAlias))
 
-	for _, idx := range indexes {
-		for _, shard := range idx.Shards {
-			go func(shard *Shard) {
-				defer wait.Done()
+	for _, shard := range indexAlias {
+		go func(shard *Shard) {
+			defer wait.Done()
 
-				dict, err := shard.b.FieldDict(field)
+			dict, err := shard.b.FieldDict(field)
+			if err != nil {
+				c <- struct {
+					err     error
+					entries []bleve_index.DictEntry
+				}{err: err}
+				return
+			}
+			defer dict.Close()
+
+			var entries []bleve_index.DictEntry
+			for {
+				entry, err := dict.Next()
 				if err != nil {
 					c <- struct {
 						err     error
@@ -479,30 +473,17 @@ func (e *Engine) FieldDict(ctx context.Context, startTime, endTime time.Time, fi
 					}{err: err}
 					return
 				}
-				defer dict.Close()
-
-				var entries []bleve_index.DictEntry
-				for {
-					entry, err := dict.Next()
-					if err != nil {
-						c <- struct {
-							err     error
-							entries []bleve_index.DictEntry
-						}{err: err}
-						return
-					}
-					if entry == nil {
-						break
-					}
-					entries = append(entries, *entry)
+				if entry == nil {
+					break
 				}
+				entries = append(entries, *entry)
+			}
 
-				c <- struct {
-					err     error
-					entries []bleve_index.DictEntry
-				}{entries: entries}
-			}(shard)
-		}
+			c <- struct {
+				err     error
+				entries []bleve_index.DictEntry
+			}{entries: entries}
+		}(shard)
 	}
 
 	wait.Wait()

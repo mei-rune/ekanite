@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,7 +25,7 @@ func (i *LazyIndex) find() *Index {
 	return i.loader.find(i)
 }
 
-func (i *LazyIndex) load() (*Index, error) {
+func (i *LazyIndex) Load() (*Index, error) {
 	return i.loader.load(i)
 }
 
@@ -45,6 +46,12 @@ func (i *LazyIndex) EndTime() time.Time { return i.endTime }
 // retention period is r.
 func (i *LazyIndex) Expired(t time.Time, r time.Duration) bool {
 	return i.endTime.Add(r).Before(t)
+}
+
+// Contains returns whether the index's time range includes the given
+// reference time.
+func (i *LazyIndex) Contains(t time.Time) bool {
+	return (t.Equal(i.startTime) || t.After(i.startTime)) && t.Before(i.endTime)
 }
 
 // Indexes is a slice of indexes.
@@ -104,6 +111,7 @@ func OpenLazyIndex(path string) (*LazyIndex, error) {
 
 type IndexLoader struct {
 	idSeed        int
+	mu            sync.RWMutex
 	allIndexes    LazyIndexes
 	fixIndexes    Indexes
 	latestIndexes Indexes
@@ -145,26 +153,26 @@ func (il *IndexLoader) Open(pa string) error {
 	return nil
 }
 
-func (il *IndexLoader) Close() error {
-	for _, idx := range im.fixIndexes {
+func (loader *IndexLoader) Close() error {
+	for _, idx := range loader.fixIndexes {
 		if err := idx.Close(); err != nil {
 			return err
 		}
 	}
-	im.fixIndexes = nil
-	for _, idx := range im.latestIndexes {
+	loader.fixIndexes = nil
+	for _, idx := range loader.latestIndexes {
 		if err := idx.Close(); err != nil {
 			return err
 		}
 	}
-	im.latestIndexes = nil
+	loader.latestIndexes = nil
 	return nil
 }
 
 // indexForReferenceTime returns an index suitable for indexing an event
 // for the given reference time. Must be called under RLock.
-func (il *IndexLoader) indexForReferenceTime(t time.Time) *LazyIndex {
-	for _, idx := range il.allIndexes {
+func (loader *IndexLoader) indexForReferenceTime(t time.Time) *LazyIndex {
+	for _, idx := range loader.allIndexes {
 		if idx.Contains(t) {
 			return idx
 		}
@@ -173,14 +181,14 @@ func (il *IndexLoader) indexForReferenceTime(t time.Time) *LazyIndex {
 }
 
 // getIndexs get all index with a given start and end time and it must be called under lock.
-func (im *IndexLoader) getIndexs(startTime, endTime time.Time) []*LazyIndex {
+func (loader *IndexLoader) getIndexs(startTime, endTime time.Time) []*LazyIndex {
 	if startTime.IsZero() {
 		if endTime.IsZero() {
-			return il.allIndexes
+			return loader.allIndexes
 		}
 
 		var indexes []*LazyIndex
-		for _, idx := range il.allIndexes {
+		for _, idx := range loader.allIndexes {
 			if endTime.Before(idx.startTime) {
 				continue
 			}
@@ -189,7 +197,7 @@ func (im *IndexLoader) getIndexs(startTime, endTime time.Time) []*LazyIndex {
 		return indexes
 	} else if endTime.IsZero() {
 		var indexes []*LazyIndex
-		for _, idx := range il.allIndexes {
+		for _, idx := range loader.allIndexes {
 			if startTime.After(idx.endTime) {
 				continue
 			}
@@ -199,7 +207,7 @@ func (im *IndexLoader) getIndexs(startTime, endTime time.Time) []*LazyIndex {
 	}
 
 	var indexes []*LazyIndex
-	for _, idx := range il.allIndexes {
+	for _, idx := range loader.allIndexes {
 		if endTime.Before(idx.startTime) {
 			//  实际数据 -------s-----e---
 			//  情况  1  --s--e-----------
@@ -218,13 +226,13 @@ func (im *IndexLoader) getIndexs(startTime, endTime time.Time) []*LazyIndex {
 	return indexes
 }
 
-func (im *IndexLoader) find(li *LazyIndex) *Index {
-	for _, idx := range im.fixIndexes {
+func (loader *IndexLoader) find(li *LazyIndex) *Index {
+	for _, idx := range loader.fixIndexes {
 		if idx.id == li.id {
 			return idx
 		}
 	}
-	for _, idx := range im.latestIndexes {
+	for _, idx := range loader.latestIndexes {
 		if idx.id == li.id {
 			return idx
 		}
@@ -232,8 +240,8 @@ func (im *IndexLoader) find(li *LazyIndex) *Index {
 	return nil
 }
 
-func (im *IndexLoader) load(li *LazyIndex) (*Index, error) {
-	idx := im.find(li)
+func (loader *IndexLoader) load(li *LazyIndex) (*Index, error) {
+	idx := loader.find(li)
 	if idx != nil {
 		return idx, nil
 	}
@@ -241,45 +249,73 @@ func (im *IndexLoader) load(li *LazyIndex) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	time.Now().
-	im.latestIndexes = append(im.latestIndexes, idx)
+
+	loader.latestIndexes = append(loader.latestIndexes, idx)
 	return idx, nil
 }
 
-func (im *IndexLoader) unload(li *LazyIndex) error {
-	for pos, idx := range im.fixIndexes {
+func (loader *IndexLoader) unload(li *LazyIndex) error {
+	for pos, idx := range loader.fixIndexes {
 		if idx.id == li.id {
-			newLen := len(im.fixIndexes) - 1
+			newLen := len(loader.fixIndexes) - 1
 			if pos != newLen {
-				copy(im.fixIndexes[idx:], im.fixIndexes[idx+1:])
+				copy(loader.fixIndexes[pos:], loader.fixIndexes[pos+1:])
 			}
-			im.fixIndexes = im.fixIndexes[:newLen]
+			loader.fixIndexes = loader.fixIndexes[:newLen]
 			return idx.Close()
 		}
 	}
-	for pos, idx := range im.latestIndexes {
+	for pos, idx := range loader.latestIndexes {
 		if idx.id == li.id {
-			newLen := len(im.latestIndexes) - 1
+			newLen := len(loader.latestIndexes) - 1
 			if pos != newLen {
-				copy(im.latestIndexes[idx:], im.latestIndexes[idx+1:])
+				copy(loader.latestIndexes[pos:], loader.latestIndexes[pos+1:])
 			}
-			im.latestIndexes = im.latestIndexes[:newLen]
+			loader.latestIndexes = loader.latestIndexes[:newLen]
 			return idx.Close()
 		}
 	}
 	return nil
 }
 
-func (im *IndexLoader) newIndex(pa string, startTime, endTime time.Time, numShards int) (*LazyIndex) {
-	im.idSeed ++
+func (im *IndexLoader) newIndex(pa string, startTime, endTime time.Time, numShards int) *LazyIndex {
+	im.idSeed++
 	i := &LazyIndex{
-		loader: im,
-		id : im.idSeed,
-		path: pa,
+		loader:    im,
+		id:        im.idSeed,
+		path:      pa,
 		startTime: startTime,
-		endTime: endTime,
+		endTime:   endTime,
 	}
 	im.allIndexes = append(im.allIndexes, i)
 	sort.Sort(im.allIndexes)
 	return i
+}
+
+func (loader *IndexLoader) GetIndexes(startTime, endTime time.Time) []*LazyIndex {
+	loader.mu.RUnlock()
+	defer loader.mu.RUnlock()
+
+	return loader.getIndexs(startTime, endTime)
+}
+
+func (loader *IndexLoader) Do(cb func(loader *IndexLoader, switchFunc func())) {
+	isReadonly := true
+
+	loader.mu.RLock()
+	defer func() {
+		if isReadonly {
+			loader.mu.RUnlock()
+		} else {
+			loader.mu.Unlock()
+		}
+	}()
+
+	cb(loader, func() {
+		if isReadonly {
+			loader.mu.RUnlock()
+			loader.mu.Lock()
+			isReadonly = false
+		}
+	})
 }

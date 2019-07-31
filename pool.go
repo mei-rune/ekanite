@@ -17,7 +17,7 @@ type resourceSemaphore struct {
 }
 
 func (rs *resourceSemaphore) init() {
-	rs.cond = c
+	rs.cond.L = &rs.mu
 }
 
 func idEqual(id int) func(*resource) bool {
@@ -34,7 +34,7 @@ func (rs *resourceSemaphore) TryAcquire(ctx context.Context, pred func(*resource
 	defer rs.mu.Unlock()
 
 	for _, r := range rs.resources {
-		if cb(r) {
+		if pred(r) {
 			r.refCounter++
 			return r
 		}
