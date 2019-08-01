@@ -248,6 +248,12 @@ func (i *Index) Expired(t time.Time, r time.Duration) bool {
 	return i.endTime.Add(r).Before(t)
 }
 
+// Contains returns whether the index's time range includes the given
+// reference time.
+func (i *Index) Contains(t time.Time) bool {
+	return (t.Equal(i.startTime) || t.After(i.startTime)) && t.Before(i.endTime)
+}
+
 // Total returns the number of documents in the index.
 func (i *Index) Total() (uint64, error) {
 	var total uint64
@@ -259,12 +265,6 @@ func (i *Index) Total() (uint64, error) {
 		total += t
 	}
 	return total, nil
-}
-
-// Contains returns whether the index's time range includes the given
-// reference time.
-func (i *Index) Contains(t time.Time) bool {
-	return (t.Equal(i.startTime) || t.After(i.startTime)) && t.Before(i.endTime)
 }
 
 // Index indexes the slice of documents in the index. It takes care of all shard routing.

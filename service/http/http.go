@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -107,9 +108,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name, pa := SplitURLPath(strings.TrimPrefix(r.URL.Path, s.urlPrefix))
+	basePath := strings.TrimPrefix(r.URL.Path, s.urlPrefix)
+	name, pa := SplitURLPath(basePath)
 	switch name {
 	case "debug":
+		r.URL.Path = basePath
 		http.DefaultServeMux.ServeHTTP(w, r)
 		return
 	case "fields":

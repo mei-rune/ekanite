@@ -201,9 +201,3 @@ func ErrArray(errList []error) error {
 
 	return errArray(errList)
 }
-
-func closeWith(closer io.Closer) {
-	if e := closer.Close(); e != nil {
-		log.Println(e.Error())
-	}
-}

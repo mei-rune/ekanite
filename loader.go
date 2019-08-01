@@ -2,6 +2,8 @@ package ekanite
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -10,27 +12,21 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type LazyIndex struct {
 	loader    *IndexLoader
+	isNew     bool
 	id        int
 	path      string    // Path to shard data
 	startTime time.Time // Start-time inclusive for this index
 	endTime   time.Time // End-time exclusive for this index
 }
 
-func (i *LazyIndex) find() *Index {
-	return i.loader.find(i)
-}
-
-func (i *LazyIndex) Load() (*Index, error) {
-	return i.loader.load(i)
-}
-
-func (i *LazyIndex) Close() error {
-	return i.loader.unload(i)
+func (i *LazyIndex) Load(ctx context.Context) (*ResourceIndex, error) {
+	return i.loader.Load(ctx, i)
 }
 
 // Path returns the path to storage for the index.
@@ -110,15 +106,19 @@ func OpenLazyIndex(path string) (*LazyIndex, error) {
 }
 
 type IndexLoader struct {
-	idSeed        int
-	mu            sync.RWMutex
-	allIndexes    LazyIndexes
-	fixIndexes    Indexes
-	latestIndexes Indexes
+	isClosed   int32
+	idSeed     int
+	path       string
+	numCaches  int
+	numShards  int
+	mu         sync.RWMutex
+	allIndexes LazyIndexes
+	// fixIndexes    Indexes
+	latestIndexes resourceSemaphore
 }
 
 // Open opens the engine.
-func (il *IndexLoader) Open(pa string) error {
+func (il *IndexLoader) Open(pa string, numShards, numCaches int) error {
 	if err := os.MkdirAll(pa, 0755); err != nil {
 		return err
 	}
@@ -150,22 +150,32 @@ func (il *IndexLoader) Open(pa string) error {
 		il.allIndexes = append(il.allIndexes, i)
 		sort.Sort(il.allIndexes)
 	}
+
+	il.path = pa
+	il.numShards = numShards
+	il.numCaches = numCaches
+	if il.numCaches == 0 {
+		il.numCaches = 2
+	}
+	il.latestIndexes.init(il.numCaches)
 	return nil
 }
 
 func (loader *IndexLoader) Close() error {
-	for _, idx := range loader.fixIndexes {
-		if err := idx.Close(); err != nil {
-			return err
-		}
+	if !atomic.CompareAndSwapInt32(&loader.isClosed, 0, 1) {
+		return nil
 	}
-	loader.fixIndexes = nil
-	for _, idx := range loader.latestIndexes {
-		if err := idx.Close(); err != nil {
-			return err
-		}
+
+	// for _, idx := range loader.fixIndexes {
+	// 	if err := idx.Close(); err != nil {
+	// 		return err
+	// 	}
+	// }
+	// loader.fixIndexes = nil
+
+	if err := loader.latestIndexes.Close(); err != nil {
+		return err
 	}
-	loader.latestIndexes = nil
 	return nil
 }
 
@@ -226,74 +236,23 @@ func (loader *IndexLoader) getIndexs(startTime, endTime time.Time) []*LazyIndex 
 	return indexes
 }
 
-func (loader *IndexLoader) find(li *LazyIndex) *Index {
-	for _, idx := range loader.fixIndexes {
-		if idx.id == li.id {
-			return idx
-		}
-	}
-	for _, idx := range loader.latestIndexes {
-		if idx.id == li.id {
-			return idx
-		}
-	}
-	return nil
-}
-
-func (loader *IndexLoader) load(li *LazyIndex) (*Index, error) {
-	idx := loader.find(li)
-	if idx != nil {
-		return idx, nil
-	}
-	idx, err := OpenIndex(li.id, li.path)
-	if err != nil {
-		return nil, err
-	}
-
-	loader.latestIndexes = append(loader.latestIndexes, idx)
-	return idx, nil
-}
-
-func (loader *IndexLoader) unload(li *LazyIndex) error {
-	for pos, idx := range loader.fixIndexes {
-		if idx.id == li.id {
-			newLen := len(loader.fixIndexes) - 1
-			if pos != newLen {
-				copy(loader.fixIndexes[pos:], loader.fixIndexes[pos+1:])
-			}
-			loader.fixIndexes = loader.fixIndexes[:newLen]
-			return idx.Close()
-		}
-	}
-	for pos, idx := range loader.latestIndexes {
-		if idx.id == li.id {
-			newLen := len(loader.latestIndexes) - 1
-			if pos != newLen {
-				copy(loader.latestIndexes[pos:], loader.latestIndexes[pos+1:])
-			}
-			loader.latestIndexes = loader.latestIndexes[:newLen]
-			return idx.Close()
-		}
-	}
-	return nil
-}
-
-func (im *IndexLoader) newIndex(pa string, startTime, endTime time.Time, numShards int) *LazyIndex {
-	im.idSeed++
+func (loader *IndexLoader) newIndex(startTime, endTime time.Time) *LazyIndex {
+	loader.idSeed++
 	i := &LazyIndex{
-		loader:    im,
-		id:        im.idSeed,
-		path:      pa,
+		loader:    loader,
+		isNew:     true,
+		id:        loader.idSeed,
+		path:      loader.path,
 		startTime: startTime,
 		endTime:   endTime,
 	}
-	im.allIndexes = append(im.allIndexes, i)
-	sort.Sort(im.allIndexes)
+	loader.allIndexes = append(loader.allIndexes, i)
+	sort.Sort(loader.allIndexes)
 	return i
 }
 
 func (loader *IndexLoader) GetIndexes(startTime, endTime time.Time) []*LazyIndex {
-	loader.mu.RUnlock()
+	loader.mu.RLock()
 	defer loader.mu.RUnlock()
 
 	return loader.getIndexs(startTime, endTime)
@@ -319,3 +278,89 @@ func (loader *IndexLoader) Do(cb func(loader *IndexLoader, switchFunc func())) {
 		}
 	})
 }
+
+type ResourceIndex struct {
+	*Index
+	r      *resource
+	loader *IndexLoader
+}
+
+func (ri *ResourceIndex) Close() error {
+	ri.loader.latestIndexes.Release(ri.r)
+	return nil
+}
+
+func (loader *IndexLoader) Load(ctx context.Context, li *LazyIndex) (*ResourceIndex, error) {
+	r, err := loader.latestIndexes.TryAcquire(ctx, li.id, false)
+	if err != nil {
+		return nil, errors.New("load '" + li.path + "':" + err.Error())
+	}
+
+	loader.mu.RLock()
+	isNew := li.isNew
+	pa := li.path
+	loader.mu.RUnlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.index != nil {
+		if r.id == r.index.id {
+			return &ResourceIndex{r.index, r, loader}, nil
+		}
+		if err := r.index.Close(); err != nil {
+			loader.latestIndexes.Release(r)
+			return nil, err
+		}
+		r.index = nil
+	}
+
+	if isNew {
+		idx, err := NewIndex(li.id, pa, li.startTime, li.endTime, loader.numShards)
+		if err != nil {
+			loader.latestIndexes.Release(r)
+			return nil, err
+		}
+		go func() {
+			loader.mu.Lock()
+			li.isNew = false
+			li.path = idx.path
+			loader.mu.Unlock()
+		}()
+
+		r.index = idx
+		return &ResourceIndex{idx, r, loader}, nil
+
+	}
+	idx, err := OpenIndex(li.id, pa)
+	if err != nil {
+		loader.latestIndexes.Release(r)
+		return nil, err
+	}
+	r.index = idx
+	return &ResourceIndex{idx, r, loader}, nil
+}
+
+// func (loader *IndexLoader) unload(li *LazyIndex) error {
+// 	for pos, idx := range loader.fixIndexes {
+// 		if idx.id == li.id {
+// 			newLen := len(loader.fixIndexes) - 1
+// 			if pos != newLen {
+// 				copy(loader.fixIndexes[pos:], loader.fixIndexes[pos+1:])
+// 			}
+// 			loader.fixIndexes = loader.fixIndexes[:newLen]
+// 			return idx.Close()
+// 		}
+// 	}
+// 	for pos, idx := range loader.latestIndexes {
+// 		if idx.id == li.id {
+// 			newLen := len(loader.latestIndexes) - 1
+// 			if pos != newLen {
+// 				copy(loader.latestIndexes[pos:], loader.latestIndexes[pos+1:])
+// 			}
+// 			loader.latestIndexes = loader.latestIndexes[:newLen]
+// 			return idx.Close()
+// 		}
+// 	}
+// 	return nil
+// }

@@ -121,6 +121,7 @@ func (b *Batcher) C() chan<- Document {
 type Engine struct {
 	path            string        // Path to all indexed data
 	NumShards       int           // Number of shards to use when creating an index.
+	NumCaches       int           // Number of caches to use when search in index.
 	IndexDuration   time.Duration // Duration of created indexes.
 	RetentionPeriod time.Duration // How long after Index end-time to hang onto data.
 
@@ -147,7 +148,7 @@ func NewEngine(path string) *Engine {
 
 // Open opens the engine.
 func (e *Engine) Open() error {
-	if err := e.indexes.Open(e.path); err != nil {
+	if err := e.indexes.Open(e.path, e.NumShards, e.NumCaches); err != nil {
 		return err
 	}
 	e.wg.Add(1)
@@ -174,26 +175,35 @@ func (e *Engine) Close() error {
 	return nil
 }
 
-// // Total returns the total number of documents indexed.
-// func (e *Engine) Total() (uint64, error) {
-// 	var total uint64
-// 	for _, li := range e.indexes.AllIndexes() {
-// 		t, err := func() (uint64, error) {
-// 			i, err := li.load()
-// 			if err != nil {
-// 				return 0, err
-// 			}
-// 			defer closeWith(i)
+// Total returns the total number of documents indexed.
+func (e *Engine) Total() (uint64, error) {
+	var total uint64
+	var errList []error
 
-// 			return i.Total()
-// 		}()
-// 		if err != nil {
-// 			return 0, err
-// 		}
-// 		total += t
-// 	}
-// 	return total, nil
-// }
+	e.indexes.Do(func(loader *IndexLoader, switchFunc func()) {
+		for _, li := range e.indexes.allIndexes {
+			t, err := func() (uint64, error) {
+				i, err := li.Load(context.Background())
+				if err != nil {
+					return 0, err
+				}
+				defer CloseWith(i)
+
+				return i.Total()
+			}()
+			if err != nil {
+				errList = append(errList, err)
+				return
+			}
+			total += t
+		}
+	})
+
+	if len(errList) != 0 {
+		return 0, ErrArray(errList)
+	}
+	return total, nil
+}
 
 // runRetentionEnforcement periodically runs retention enforcement.
 func (e *Engine) runRetentionEnforcement() {
@@ -216,10 +226,10 @@ func (e *Engine) enforceRetention() {
 		filtered := loader.allIndexes[:0]
 		for _, i := range loader.allIndexes {
 			if i.Expired(time.Now().UTC(), e.RetentionPeriod) {
-				if err := i.Close(); err != nil {
-					e.Logger.Printf("retention enforcement failed to close index %s: %s", i.path, err.Error())
-					continue
-				}
+				// if err := i.Close(); err != nil {
+				// 	e.Logger.Printf("retention enforcement failed to close index %s: %s", i.path, err.Error())
+				// 	continue
+				// }
 
 				if err := os.RemoveAll(i.path); err != nil {
 					e.Logger.Printf("retention enforcement failed to delete index %s: %s", i.path, err.Error())
@@ -254,7 +264,7 @@ func (e *Engine) createIndex(loader *IndexLoader, startTime, endTime time.Time) 
 		assert(!startTime.After(endTime), "new start time after end time")
 	}
 
-	i := loader.newIndex(e.path, startTime, endTime, e.NumShards)
+	i := loader.newIndex(startTime, endTime)
 
 	e.Logger.Printf("index %s created with %d shards, start time: %s, end time: %s",
 		i.Path(), e.NumShards, i.StartTime(), i.EndTime())
@@ -299,16 +309,16 @@ func (e *Engine) Index(events []Document) error {
 		go func(li *LazyIndex, b []Document) {
 			defer wg.Done()
 
-			i, err := lazyIndex.Load()
+			i, err := lazyIndex.Load(context.Background())
 			if err != nil {
 				mu.Lock()
 				errList = append(errList, err)
 				mu.Unlock()
 				return
 			}
-			defer closeWith(i)
+			defer CloseWith(i)
 
-			if err := i.Index(b); err != nil {
+			if err := i.Index.Index(b); err != nil {
 				mu.Lock()
 				errList = append(errList, err)
 				mu.Unlock()
@@ -331,20 +341,20 @@ func (e *Engine) Query(ctx context.Context, startTime, endTime time.Time, req *b
 		return bleve.ErrorAliasEmpty
 	}
 
-	var indexAlias = make([]bleve.Index, 0, len(indexes)*e.NumShards)
-	for _, i := range indexes {
-		idx, err := i.Load()
-		if err != nil {
-			return err
-		}
-		defer closeWith(idx)
+	// var indexAlias = make([]bleve.Index, 0, len(indexes)*e.NumShards)
+	// for _, i := range indexes {
+	// 	idx, err := i.Load(ctx)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	defer CloseWith(idx)
 
-		for _, shard := range idx.Shards {
-			indexAlias = append(indexAlias, shard.b)
-		}
-	}
+	// 	for _, shard := range idx.Shards {
+	// 		indexAlias = append(indexAlias, shard.b)
+	// 	}
+	// }
 
-	result, err := bleve.MultiSearch(ctx, req, indexAlias...)
+	result, err := MultiSearch(ctx, req, indexes)
 	if err != nil {
 		return err
 	}
@@ -359,37 +369,46 @@ func (e *Engine) Fields(ctx context.Context, startTime, endTime time.Time) ([]st
 		return nil, bleve.ErrorAliasEmpty
 	}
 
-	var indexAlias = make([]*Shard, 0, len(indexes)*e.NumShards)
-	for _, i := range indexes {
-		idx, err := i.Load()
-		if err != nil {
-			return nil, err
-		}
-		defer closeWith(idx)
-
-		for _, shard := range idx.Shards {
-			indexAlias = append(indexAlias, shard)
-		}
-	}
-
 	var wait sync.WaitGroup
-	c := make(chan struct {
+	c := make(chan []struct {
 		err    error
 		fields []string
-	}, len(indexAlias))
+	}, len(indexes))
 
-	wait.Add(len(indexAlias))
+	wait.Add(len(indexes))
 
-	for _, shard := range indexAlias {
-		go func(shard *Shard) {
+	for _, i := range indexes {
+		go func(li *LazyIndex) {
 			defer wait.Done()
 
-			fields, err := shard.b.Fields()
-			c <- struct {
+			var results []struct {
 				err    error
 				fields []string
-			}{err: err, fields: fields}
-		}(shard)
+			}
+
+			idx, err := li.Load(ctx)
+			if err != nil {
+
+				results = append(results, struct {
+					err    error
+					fields []string
+				}{err: err})
+
+				c <- results
+				return
+			}
+			defer CloseWith(idx)
+
+			for _, shard := range idx.Shards {
+				fields, err := shard.b.Fields()
+				results = append(results, struct {
+					err    error
+					fields []string
+				}{err: err, fields: fields})
+			}
+
+			c <- results
+		}(i)
 	}
 
 	wait.Wait()
@@ -397,21 +416,18 @@ func (e *Engine) Fields(ctx context.Context, startTime, endTime time.Time) ([]st
 
 	var allFields = map[string]struct{}{}
 	var errList []error
-	for r := range c {
-		for _, field := range r.fields {
-			allFields[field] = struct{}{}
-		}
-		if r.err != nil {
-			errList = append(errList, r.err)
+	for rl := range c {
+		for _, r := range rl {
+			for _, field := range r.fields {
+				allFields[field] = struct{}{}
+			}
+			if r.err != nil {
+				errList = append(errList, r.err)
+			}
 		}
 	}
 	if len(errList) > 0 {
-		var buf bytes.Buffer
-		for _, err := range errList {
-			buf.WriteString(err.Error())
-			buf.WriteString("\n")
-		}
-		return nil, errors.New(buf.String())
+		return nil, ErrArray(errList)
 	}
 
 	fields := make([]string, 0, len(allFields))
@@ -428,32 +444,19 @@ func (e *Engine) FieldDict(ctx context.Context, startTime, endTime time.Time, fi
 	if len(indexes) == 0 {
 		return nil, bleve.ErrorAliasEmpty
 	}
-	var indexAlias = make([]*Shard, 0, len(indexes)*e.NumShards)
-	for _, i := range indexes {
-		idx, err := i.Load()
-		if err != nil {
-			return nil, err
-		}
-		defer closeWith(idx)
-
-		for _, shard := range idx.Shards {
-			indexAlias = append(indexAlias, shard)
-		}
-	}
-
 	var wait sync.WaitGroup
 	c := make(chan struct {
 		err     error
 		entries []bleve_index.DictEntry
-	}, len(indexAlias))
+	}, len(indexes))
 
-	wait.Add(len(indexAlias))
+	wait.Add(len(indexes))
 
-	for _, shard := range indexAlias {
-		go func(shard *Shard) {
+	for _, i := range indexes {
+		go func(li *LazyIndex) {
 			defer wait.Done()
 
-			dict, err := shard.b.FieldDict(field)
+			idx, err := li.Load(ctx)
 			if err != nil {
 				c <- struct {
 					err     error
@@ -461,11 +464,11 @@ func (e *Engine) FieldDict(ctx context.Context, startTime, endTime time.Time, fi
 				}{err: err}
 				return
 			}
-			defer dict.Close()
+			defer CloseWith(idx)
 
 			var entries []bleve_index.DictEntry
-			for {
-				entry, err := dict.Next()
+			for _, shard := range idx.Shards {
+				dict, err := shard.b.FieldDict(field)
 				if err != nil {
 					c <- struct {
 						err     error
@@ -473,17 +476,29 @@ func (e *Engine) FieldDict(ctx context.Context, startTime, endTime time.Time, fi
 					}{err: err}
 					return
 				}
-				if entry == nil {
-					break
+				defer dict.Close()
+
+				for {
+					entry, err := dict.Next()
+					if err != nil {
+						c <- struct {
+							err     error
+							entries []bleve_index.DictEntry
+						}{err: err}
+						return
+					}
+					if entry == nil {
+						break
+					}
+					entries = append(entries, *entry)
 				}
-				entries = append(entries, *entry)
 			}
 
 			c <- struct {
 				err     error
 				entries []bleve_index.DictEntry
 			}{entries: entries}
-		}(shard)
+		}(i)
 	}
 
 	wait.Wait()

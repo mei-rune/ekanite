@@ -266,9 +266,6 @@ func copyShard(oldShard *Shard, writer Writer, delta time.Duration) error {
 					panic(fmt.Errorf("field %s : %s", f.Name(), err))
 				}
 				value = t.Add(delta)
-			// case *document.DateTimeField:
-			// 	t, _ := field.DateTime()
-			// 	value = t
 			case *document.BooleanField:
 				b, err := field.Boolean()
 				if err != nil {
