@@ -125,6 +125,7 @@ type Engine struct {
 	path            string        // Path to all indexed data
 	NumShards       int           // Number of shards to use when creating an index.
 	IndexDuration   time.Duration // Duration of created indexes.
+	NumCaches       int           // Number of caches to use when search in index.
 	RetentionPeriod time.Duration // How long after Index end-time to hang onto data.
 
 	mu      sync.RWMutex
