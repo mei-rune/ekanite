@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -35,6 +36,7 @@ func TestEngine_IndexMapThenSearch(t *testing.T) {
 	dataDir := tempPath()
 	defer os.RemoveAll(dataDir)
 	e := ekanite.NewEngine(dataDir)
+	e.Open()
 
 	ev1 := newMapEvent(ParseTime("1982-02-05T04:43:00Z"), map[string]interface{}{
 		"address":  "127.0.0.1",
@@ -55,9 +57,11 @@ func TestEngine_IndexMapThenSearch(t *testing.T) {
 		"facility": 2,
 	})
 
-	if err := e.Index([]ekanite.Document{ev1, ev2, ev3}); err != nil {
+	continuation := &ekanite.Continuation{}
+	if err := e.Index(continuation, []ekanite.Document{ev1, ev2, ev3}); err != nil {
 		t.Fatalf("failed to index events: %s", err.Error())
 	}
+	ekanite.CloseWith(continuation)
 	total, err := e.Total()
 	if err != nil {
 		t.Errorf("failed to get engine total doc count: %s", err.Error())
@@ -142,5 +146,5 @@ func searchIn(searcher ekanite.Searcher, start, end time.Time, searchRequest *bl
 	}
 
 	// execute the query
-	return searcher.Query(start, end, searchRequest, cb)
+	return searcher.Query(context.Background(), start, end, searchRequest, cb)
 }
