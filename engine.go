@@ -37,9 +37,22 @@ type Searcher interface {
 	FieldDict(ctx context.Context, startTime, endTime time.Time, field string) ([]bleve_index.DictEntry, error)
 }
 
+type Continuation struct {
+	lastest *ResourceIndex
+}
+
+func (c *Continuation) Close() error {
+	if c.lastest == nil {
+		return nil
+	}
+	err := c.lastest.Close()
+	c.lastest = nil
+	return err
+}
+
 // EventIndexer is the interface a system than can index events must implement.
 type EventIndexer interface {
-	Index(events []Document) error
+	Index(ctx *Continuation, events []Document) error
 }
 
 // Batcher accepts "input events", and once it has a certain number, or a certain amount
@@ -68,12 +81,15 @@ func NewBatcher(e EventIndexer, sz int, dur time.Duration, max int) *Batcher {
 // Start starts the batching process.
 func (b *Batcher) Start(errChan chan<- error) error {
 	go func() {
+		var ctx Continuation
 		batch := make([]Document, 0, b.size)
 		timer := time.NewTimer(b.duration)
 		timer.Stop() // Stop any first firing.
 
+		defer CloseWith(&ctx)
+
 		send := func() {
-			err := b.indexer.Index(batch)
+			err := b.indexer.Index(&ctx, batch)
 			if err != nil {
 				stats.Add("batchIndexedError", 1)
 				return
@@ -272,7 +288,7 @@ func (e *Engine) createIndex(loader *IndexLoader, startTime, endTime time.Time) 
 }
 
 // Index indexes a batch of Events. It blocks until all processing has completed.
-func (e *Engine) Index(events []Document) error {
+func (e *Engine) Index(ctx *Continuation, events []Document) error {
 	var wg sync.WaitGroup
 
 	// De-multiplex the batch into sub-batches, one sub-batch for each Index.
@@ -301,6 +317,13 @@ func (e *Engine) Index(events []Document) error {
 		}
 	})
 
+	if len(subBatches) > 1 {
+		if ctx.lastest != nil {
+			CloseWith(ctx.lastest)
+			ctx.lastest = nil
+		}
+	}
+
 	var mu sync.Mutex
 	var errList []error
 	// Index each batch in parallel.
@@ -309,15 +332,27 @@ func (e *Engine) Index(events []Document) error {
 		go func(li *LazyIndex, b []Document) {
 			defer wg.Done()
 
-			i, err := lazyIndex.Load(context.Background())
-			if err != nil {
-				mu.Lock()
-				errList = append(errList, err)
-				mu.Unlock()
-				return
+			var i *ResourceIndex
+			if ctx.lastest != nil {
+				if ctx.lastest.r.id == li.id {
+					i = ctx.lastest
+				}
 			}
-			defer CloseWith(i)
-
+			if i == nil {
+				var err error
+				i, err = lazyIndex.Load(context.Background())
+				if err != nil {
+					mu.Lock()
+					errList = append(errList, err)
+					mu.Unlock()
+					return
+				}
+				if len(subBatches) == 1 {
+					ctx.lastest = i
+				} else {
+					defer CloseWith(i)
+				}
+			}
 			if err := i.Index.Index(b); err != nil {
 				mu.Lock()
 				errList = append(errList, err)

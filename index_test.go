@@ -40,7 +40,7 @@ func TestIndex_NewIndex(t *testing.T) {
 	defer os.RemoveAll(path)
 
 	start := parseTime("2006-01-02T22:04:00Z")
-	i, err := NewIndex(path, start.UTC(), start.Add(time.Hour), 4)
+	i, err := NewIndex(0, path, start.UTC(), start.Add(time.Hour), 4)
 	if err != nil || i == nil {
 		t.Fatalf("failed to create new index at %s %s", path, err)
 	}
@@ -93,7 +93,7 @@ func TestIndex_Expired(t *testing.T) {
 	retentionPeriod := 24 * time.Hour
 	startTime := parseTime("2006-01-02T22:04:00Z").UTC()
 	endTime := parseTime("2006-01-02T22:04:00Z").Add(time.Hour).UTC()
-	i, _ := NewIndex(path, startTime, endTime, 1)
+	i, _ := NewIndex(0, path, startTime, endTime, 1)
 	defer i.Close()
 
 	tests := []struct {
@@ -133,13 +133,13 @@ func TestIndex_OpenIndex(t *testing.T) {
 	startTime := start.UTC()
 	endTime := start.Add(time.Hour).UTC()
 
-	n, err := NewIndex(path, startTime, endTime, 4)
+	n, err := NewIndex(0, path, startTime, endTime, 4)
 	if err != nil {
 		t.Fatalf("failed to create new index for Open() test at %s %s", path, err)
 	}
 	n.Close() // Close it, or it can't be opened.
 
-	i, err := OpenIndex(path + "/20060104_0004")
+	i, err := OpenIndex(0, path+"/20060104_0004")
 	if err != nil {
 		t.Fatalf("failed to open index for Open() test at %s %s", path, err)
 	}
@@ -167,7 +167,7 @@ func TestIndex_DeleteIndex(t *testing.T) {
 	defer os.RemoveAll(path)
 
 	now := time.Now().UTC()
-	i, err := NewIndex(path, now, now.Add(time.Hour), 4)
+	i, err := NewIndex(0, path, now, now.Add(time.Hour), 4)
 	if err != nil {
 		t.Fatalf("failed to create new index for Open() test at %s %s", path, err)
 	}
@@ -182,7 +182,7 @@ func TestIndex_Index(t *testing.T) {
 	path := tempPath()
 	defer os.RemoveAll(path)
 	now := time.Now().UTC()
-	i, _ := NewIndex(path, now, now, 2)
+	i, _ := NewIndex(0, path, now, now, 2)
 
 	d1 := testDoc{id: DocID("00000000000000000000000000001234"), line: "password accepted for user root"}
 	d2 := testDoc{id: DocID("00000000000000000000000000005678"), line: "GET /index.html"}
@@ -205,7 +205,7 @@ func TestIndex_Document(t *testing.T) {
 	path := tempPath()
 	defer os.RemoveAll(path)
 	now := time.Now().UTC()
-	i, _ := NewIndex(path, now, now, 2)
+	i, _ := NewIndex(0, path, now, now, 2)
 
 	id := DocID("1234")
 	source := "password accepted for user root"
@@ -229,7 +229,7 @@ func TestIndex_IndexSimpleSearch(t *testing.T) {
 	path := tempPath()
 	defer os.RemoveAll(path)
 	now := time.Now().UTC()
-	i, _ := NewIndex(path, now, now, 4)
+	i, _ := NewIndex(0, path, now, now, 4)
 
 	d1 := testDoc{id: DocID("00000000000000000000000000001234"), line: "auth password accepted for user philip"}
 	d2 := testDoc{id: DocID("0000000000000000000000000000ABCD"), line: "auth password invalid for user root"}
@@ -345,7 +345,7 @@ func TestIndex_IndexSimpleSearch(t *testing.T) {
 
 	// Close, re-open the index, and try all searches again.
 	i.Close()
-	i, err := OpenIndex(i.Path())
+	i, err := OpenIndex(0, i.Path())
 	if err != nil {
 		t.Fatalf("failed to re-open index at %s: %s", i.Path(), err.Error())
 	}
@@ -356,7 +356,7 @@ func TestIndex_Shard(t *testing.T) {
 	path := tempPath()
 	defer os.RemoveAll(path)
 	now := time.Now().UTC()
-	i, _ := NewIndex(path, now, now.Add(time.Hour), 2)
+	i, _ := NewIndex(0, path, now, now.Add(time.Hour), 2)
 	s := i.Shard(DocID("00000000000000000000000000001234"))
 	if s == nil {
 		t.Fatalf("failed to get shard for doc 1234")
@@ -404,10 +404,12 @@ func TestShard_Index(t *testing.T) {
 	d2 := testDoc{id: DocID("00000000000000000000000000005678"), line: "this is a log line"}
 	d3 := testDoc{id: DocID("00000000000000000000000000009abc"), line: "this is a log line"}
 
+	//continuation := &Continuation{}
 	// Index a single document
 	if err := s.Index([]Document{d1}); err != nil {
 		t.Fatalf("failed to index single document: %s", err.Error())
 	}
+	//CloseWith(continuation)
 	if c, _ := s.Total(); c != 1 {
 		t.Fatalf("shard indexed count incorrect, got %d, expected 1", c)
 	}

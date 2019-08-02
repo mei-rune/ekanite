@@ -21,7 +21,7 @@ type TestIndexer struct {
 	EventsRx  int
 }
 
-func (t *TestIndexer) Index(b []Document) error {
+func (t *TestIndexer) Index(c *Continuation, b []Document) error {
 	t.BatchesRx++
 	t.EventsRx += len(b)
 	return nil
@@ -275,6 +275,7 @@ func TestEngine_IndexThenSearch(t *testing.T) {
 	dataDir := tempPath()
 	defer os.RemoveAll(dataDir)
 	e := NewEngine(dataDir)
+	e.Open()
 
 	line1 := "auth password accepted for user philip"
 	ev1 := newIndexableEvent(line1, parseTime("1982-02-05T04:43:00Z"))
@@ -283,9 +284,12 @@ func TestEngine_IndexThenSearch(t *testing.T) {
 	line3 := "auth password rejected for user philip"
 	ev3 := newIndexableEvent(line3, parseTime("1982-02-05T04:43:02Z"))
 
-	if err := e.Index([]Document{ev1, ev2, ev3}); err != nil {
+	continuation := &Continuation{}
+	if err := e.Index(continuation, []Document{ev1, ev2, ev3}); err != nil {
 		t.Fatalf("failed to index events: %s", err.Error())
 	}
+	CloseWith(continuation)
+
 	total, err := e.Total()
 	if err != nil {
 		t.Errorf("failed to get engine total doc count: %s", err.Error())
@@ -346,8 +350,8 @@ func TestEngine_RetentionEnforcement(t *testing.T) {
 	e.RetentionPeriod = 24 * time.Hour
 
 	now := time.Now().UTC()
-	idx, _ := e.createIndex(&e.indexes, now.Add(-1*time.Hour), now)
-	_, _ = e.createIndex(&e.indexes, now.Add(-48*time.Hour), now.Add(-47*time.Hour))
+	idx := e.createIndex(&e.indexes, now.Add(-1*time.Hour), now)
+	_ = e.createIndex(&e.indexes, now.Add(-48*time.Hour), now.Add(-47*time.Hour))
 
 	if len(e.indexes.allIndexes) != 2 {
 		t.Fatalf("engine has wrong number of indexes for retention test pre-enforcement")
@@ -357,7 +361,7 @@ func TestEngine_RetentionEnforcement(t *testing.T) {
 	if len(e.indexes.allIndexes) != 1 {
 		t.Fatalf("engine has wrong number of indexes for retention test post-enforcement")
 	}
-	if e.indexes[0] != idx {
+	if e.indexes.allIndexes[0] != idx {
 		t.Fatalf("retention enforcement deleted wrong index")
 	}
 }
@@ -398,7 +402,7 @@ func testEngineIndexForReferenceTime(t *testing.T, e *Engine) {
 
 	tests := []struct {
 		timestamp time.Time
-		index     *Index
+		index     *LazyIndex
 	}{
 		{
 			start1.Add(-time.Hour).UTC(),
@@ -428,9 +432,11 @@ func testEngineIndexForReferenceTime(t *testing.T, e *Engine) {
 func testEngineIndex(t *testing.T, e *Engine) {
 	ev := newIndexableEvent("this is event 1234", parseTime("1982-02-05T04:43:00Z"))
 
-	if err := e.Index([]Document{ev}); err != nil {
+	continuation := &Continuation{}
+	if err := e.Index(continuation, []Document{ev}); err != nil {
 		t.Fatalf("failed to index event %v: %s", ev, err.Error())
 	}
+	CloseWith(continuation)
 	total, err := e.Total()
 	if err != nil {
 		t.Fatalf("failed to get engine total doc count: %s", err.Error())
@@ -452,9 +458,11 @@ func testEngineIndexPrime(t *testing.T, e *Engine) {
 		batch = append(batch, ev)
 	}
 
-	if err := e.Index(batch); err != nil {
+	continuation := &Continuation{}
+	if err := e.Index(continuation, batch); err != nil {
 		t.Fatalf("failed to index %d events: %s", batchSize, err.Error())
 	}
+	CloseWith(continuation)
 	total, err := e.Total()
 	if err != nil {
 		t.Fatalf("failed to get engine total doc count: %s", err.Error())
@@ -557,6 +565,7 @@ func searchString(logger *log.Logger, searcher Searcher, field, q string) (<-cha
 	searchRequest := bleve.NewSearchRequest(query)
 	searchRequest.Size = MaxSearchHitSize
 	searchRequest.Fields = []string{"*"}
+	searchRequest.SortBy([]string{"time"})
 
 	// validate the query
 	err := query.Validate()

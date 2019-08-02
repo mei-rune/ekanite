@@ -2,6 +2,8 @@ package ekanite
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -59,6 +61,9 @@ func MultiSearch(ctx context.Context, req *bleve.SearchRequest, indexes []*LazyI
 			return
 		}
 		defer CloseWith(index)
+
+		bs, _ := json.Marshal(childReq)
+		fmt.Println(string(bs))
 
 		rv.Result, rv.Err = index.Index.Alias.SearchInContext(ctx, childReq)
 		asyncResults <- &rv
