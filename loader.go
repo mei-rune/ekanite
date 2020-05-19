@@ -332,7 +332,7 @@ func (loader *IndexLoader) Load(ctx context.Context, li *LazyIndex) (*ResourceIn
 		return &ResourceIndex{idx, r, loader}, nil
 
 	}
-	idx, err := OpenIndex(li.id, pa)
+	idx, err := OpenIndex(li.id, pa, li.startTime, li.endTime)
 	if err != nil {
 		loader.latestIndexes.Release(r)
 		return nil, err

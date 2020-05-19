@@ -159,7 +159,7 @@ func NewIndex(id int, path string, startTime, endTime time.Time, numShards int) 
 }
 
 // OpenIndex opens an existing index, at the given path.
-func OpenIndex(id int, path string) (*Index, error) {
+func OpenIndex(id int, path string, exceptstartTime, exceptEndTime time.Time) (*Index, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to access index at %s", path)
@@ -177,19 +177,22 @@ func OpenIndex(id int, path string) (*Index, error) {
 	var endTime time.Time
 	f, err := os.Open(filepath.Join(path, endTimeFileName))
 	if err != nil {
-		return nil, fmt.Errorf("unable to open end time file for index: %s", err.Error())
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("unable to open end time file for index: %s", err.Error())
+		}
+		endTime = exceptEndTime
+	} else {
+		defer f.Close()
+		r := bufio.NewReader(f)
+		s, err := r.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("unable to determine end time of index: %s", err.Error())
+		}
+		endTime, err = time.Parse(indexNameLayout, s)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse end time from '%s': %s", s, err.Error())
+		}
 	}
-	defer f.Close()
-	r := bufio.NewReader(f)
-	s, err := r.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("unable to determine end time of index: %s", err.Error())
-	}
-	endTime, err = time.Parse(indexNameLayout, s)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse end time from '%s': %s", s, err.Error())
-	}
-
 	// Open the shards.
 	names, err := listShards(path)
 	if err != nil {

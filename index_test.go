@@ -139,7 +139,7 @@ func TestIndex_OpenIndex(t *testing.T) {
 	}
 	n.Close() // Close it, or it can't be opened.
 
-	i, err := OpenIndex(0, path+"/20060104_0004")
+	i, err := OpenIndex(0, path+"/20060104_0004", startTime, endTime)
 	if err != nil {
 		t.Fatalf("failed to open index for Open() test at %s %s", path, err)
 	}
@@ -345,7 +345,7 @@ func TestIndex_IndexSimpleSearch(t *testing.T) {
 
 	// Close, re-open the index, and try all searches again.
 	i.Close()
-	i, err := OpenIndex(0, i.Path())
+	i, err := OpenIndex(0, i.Path(), now, now)
 	if err != nil {
 		t.Fatalf("failed to re-open index at %s: %s", i.Path(), err.Error())
 	}
