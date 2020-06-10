@@ -164,7 +164,7 @@ func NewEngine(path string) *Engine {
 
 // Open opens the engine.
 func (e *Engine) Open() error {
-	if err := e.indexes.Open(e.path, e.NumShards, e.NumCaches); err != nil {
+	if err := e.indexes.Open(e.path, e.NumShards, e.NumCaches, e.IndexDuration); err != nil {
 		return err
 	}
 	e.wg.Add(1)

@@ -65,8 +65,8 @@ func (i LazyIndexes) Less(u, v int) bool {
 }
 func (i LazyIndexes) Swap(u, v int) { i[u], i[v] = i[v], i[u] }
 
-// OpenIndex opens an existing index, at the given path.
-func OpenLazyIndex(path string) (*LazyIndex, error) {
+// OpenLazyIndex opens an existing index, at the given path.
+func OpenLazyIndex(path string, indexDuration time.Duration) (*LazyIndex, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to access index at %s", path)
@@ -84,17 +84,22 @@ func OpenLazyIndex(path string) (*LazyIndex, error) {
 	var endTime time.Time
 	f, err := os.Open(filepath.Join(path, endTimeFileName))
 	if err != nil {
-		return nil, fmt.Errorf("unable to open end time file for index: %s", err.Error())
-	}
-	defer f.Close()
-	r := bufio.NewReader(f)
-	s, err := r.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("unable to determine end time of index: %s", err.Error())
-	}
-	endTime, err = time.Parse(indexNameLayout, s)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse end time from '%s': %s", s, err.Error())
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("unable to open end time file for index: %s", err.Error())
+		}
+		endTime = startTime.Add(indexDuration)
+	} else {
+		defer f.Close()
+
+		r := bufio.NewReader(f)
+		s, err := r.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("unable to determine end time of index: %s", err.Error())
+		}
+		endTime, err = time.Parse(indexNameLayout, s)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse end time from '%s': %s", s, err.Error())
+		}
 	}
 
 	// Index is ready to go.
@@ -118,7 +123,7 @@ type IndexLoader struct {
 }
 
 // Open opens the engine.
-func (il *IndexLoader) Open(pa string, numShards, numCaches int) error {
+func (il *IndexLoader) Open(pa string, numShards, numCaches int, indexDuration time.Duration) error {
 	if err := os.MkdirAll(pa, 0755); err != nil {
 		return err
 	}
@@ -139,7 +144,7 @@ func (il *IndexLoader) Open(pa string, numShards, numCaches int) error {
 			continue
 		}
 		indexPath := filepath.Join(pa, fi.Name())
-		i, err := OpenLazyIndex(indexPath)
+		i, err := OpenLazyIndex(indexPath, indexDuration)
 		if err != nil {
 			return fmt.Errorf("engine failed to open at index %s: %s", indexPath, err.Error())
 		}
