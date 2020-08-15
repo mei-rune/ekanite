@@ -187,6 +187,7 @@ type Query struct {
 	Description       string                     `json:"description,omitempty"`
 	Filters           []Filter                   `json:"filters,omitempty"`
 	ContinuousQueries map[string]ContinuousQuery `json:"continuous_queries,omitempty"`
+	Sort              string                     `json:"sort,omitempty"`
 }
 
 // ToQueries 转换为 query.Query 列表

@@ -130,6 +130,9 @@ func (s *Server) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request)
 		s.RenderText(w, req, http.StatusBadRequest, err.Error())
 		return
 	}
+	if qu.Sort == "" {
+		qu.Sort = "-reception"
+	}
 
 	queries, err := qu.ToQueries()
 	if err != nil {
@@ -143,7 +146,7 @@ func (s *Server) SearchByFiltersInBody(w http.ResponseWriter, req *http.Request)
 	queryParams := req.URL.Query()
 	searchRequest := bleve.NewSearchRequest(q)
 	searchRequest.Fields = readStringArray(queryParams, "fields", []string{"*"})
-	searchRequest.SortBy(readStringArray(queryParams, "sort", []string{"-reception"}))
+	searchRequest.SortBy(readStringArray(queryParams, "sort", []string{qu.Sort}))
 
 	s.SearchIn(w, req, searchRequest, func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 		var documents = make([]interface{}, 0, resp.Hits.Len())
