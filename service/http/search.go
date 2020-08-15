@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -193,19 +194,30 @@ func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query
 	ss := strings.Fields(groupBy)
 	switch len(ss) {
 	case 1:
-		if ss[0] == "reception" {
+		if ss[0] == "severity" || ss[0] == "reception" {
 			s.RenderText(w, req, http.StatusBadRequest,
 				"group by("+groupBy+") is invalid format")
 			return
 		}
 		s.groupByAny(w, req, q, start, end, groupBy)
 	case 2:
-		if ss[0] != "reception" {
-			s.RenderText(w, req, http.StatusBadRequest,
-				"group by("+groupBy+") is invalid format")
+		switch ss[0] {
+		case "severity":
+			rangeArray := strings.Split(ss[1], ",")
+			if len(rangeArray) != 3 {
+				s.RenderText(w, req, http.StatusBadRequest,
+					"group by("+groupBy+") is invalid format")
+				return
+			}
+			s.groupByNumeric(w, req, q, start, end, ss[0], rangeArray[0], rangeArray[1], rangeArray[2])
+			return
+		case "reception":
+			s.groupByTimestamp(w, req, q, start, end, ss[0], ss[1])
 			return
 		}
-		s.groupByTimestamp(w, req, q, start, end, ss[0], ss[1])
+		s.RenderText(w, req, http.StatusBadRequest,
+			"group by("+groupBy+") is invalid format")
+		return
 	default:
 		s.RenderText(w, req, http.StatusBadRequest,
 			"group by("+groupBy+") is invalid format")
@@ -226,6 +238,43 @@ func (s *Server) groupByAny(w http.ResponseWriter, req *http.Request, q query.Qu
 		return
 	}
 	renderJSON(w, results)
+}
+
+func (s *Server) groupByNumeric(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time,
+	field string, start, end, step string) {
+	intStart, err := strconv.ParseInt(start, 10, 64)
+	if err != nil {
+		s.RenderText(w, req, http.StatusBadRequest,
+			"error executing query: `"+start+"' is invalid in 'group by'")
+		return
+	}
+	intEnd, err := strconv.ParseInt(end, 10, 64)
+	if err != nil {
+		s.RenderText(w, req, http.StatusBadRequest,
+			"error executing query: `"+end+"' is invalid in 'group by'")
+		return
+	}
+
+	intStep, err := strconv.ParseInt(step, 10, 64)
+	if err != nil {
+		s.RenderText(w, req, http.StatusBadRequest,
+			"error executing query: `"+step+"' is invalid in 'group by'")
+		return
+	}
+
+	err = ekanite.GroupByNumeric(s.Searcher, req.Context(), startAt, endAt, q, field, intStart, intEnd, intStep,
+		func(req *bleve.SearchRequest, resp *bleve.SearchResult, results []*search.NumericRangeFacet) error {
+			return encodeJSON(w, results)
+		})
+	if err != nil {
+		if err == bleve.ErrorAliasEmpty {
+			encodeJSON(w, []*search.DateRangeFacet{})
+		} else {
+			s.RenderText(w, req, http.StatusBadRequest,
+				fmt.Sprintf("error executing query: %v", err))
+		}
+		return
+	}
 }
 
 func (s *Server) groupByTimestamp(w http.ResponseWriter, req *http.Request, q query.Query, startAt, endAt time.Time, field, value string) {

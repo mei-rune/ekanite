@@ -102,6 +102,62 @@ func GroupBy(seacher Searcher, ctx context.Context, startAt, endAt time.Time, q 
 	return cb(stats)
 }
 
+func GroupByNumeric(seacher Searcher, ctx context.Context, startAt, endAt time.Time, q query.Query, field string, start, end, step int64,
+	cb func(req *bleve.SearchRequest, resp *bleve.SearchResult, results []*search.NumericRangeFacet) error) error {
+	facetRequest, err := facetByNumericRange(field, start, end, step)
+	if err != nil {
+		return err
+	}
+	searchRequest := bleve.NewSearchRequest(q)
+	searchRequest.AddFacet(field, facetRequest)
+
+	//bs, _ := json.Marshal(searchRequest)
+	//s.Logger.Printf("parsed request %s", string(bs))
+
+	// validate the query
+	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {
+		err := srqv.Validate()
+		if err != nil {
+			return errors.New("error validating query: " + err.Error())
+		}
+	}
+
+	// execute the query
+	return seacher.Query(ctx, startAt, endAt, searchRequest,
+		func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
+			if len(resp.Facets) == 0 {
+				return errors.New("facets is empty in the search result")
+			}
+
+			count := 0
+			for _, facet := range resp.Facets {
+				count += len(facet.NumericRanges)
+			}
+
+			var results = make([]*search.NumericRangeFacet, 0, count)
+			for _, facet := range resp.Facets {
+				if results == nil {
+					continue
+				}
+
+				results = append(results, facet.NumericRanges...)
+			}
+
+			sort.Slice(results, func(a, b int) bool {
+				if results[a].Min == nil {
+					return false
+				}
+
+				if results[b].Min == nil {
+					return true
+				}
+
+				return *results[a].Min < *results[b].Min
+			})
+			return cb(req, resp, results)
+		})
+}
+
 func GroupByTime(seacher Searcher, ctx context.Context, startAt, endAt time.Time, q query.Query, field string, value time.Duration,
 	cb func(req *bleve.SearchRequest, resp *bleve.SearchResult, results []*search.DateRangeFacet) error) error {
 	facetRequest, err := facetByTime(startAt, endAt, field, value)
@@ -173,6 +229,32 @@ func facetByTime(startAt, endAt time.Time, field string, value time.Duration) (*
 
 		nextStart = nextEnd
 		nextEnd = nextStart.Add(value)
+	}
+
+	return facetRequest, nil
+}
+
+func facetByNumericRange(field string, start, end, interval int64) (*bleve.FacetRequest, error) {
+	facetRequest := bleve.NewFacetRequest(field, math.MaxInt32)
+	nextStart := start
+	nextEnd := start + interval
+
+	for nextEnd <= end {
+		name := strconv.FormatInt(nextStart, 10)
+
+		min := float64(nextStart)
+		max := float64(nextEnd)
+
+		if nextStart == start {
+			facetRequest.AddNumericRange(name, nil, &max)
+		} else if nextEnd == end {
+			facetRequest.AddNumericRange(name, &min, nil)
+		} else {
+			facetRequest.AddNumericRange(name, &min, &max)
+		}
+
+		nextStart = nextEnd
+		nextEnd = nextStart + interval
 	}
 
 	return facetRequest, nil
