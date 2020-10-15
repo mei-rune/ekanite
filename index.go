@@ -20,6 +20,7 @@ import (
 	"github.com/blevesearch/bleve/analysis/tokenizer/regexp"
 	"github.com/blevesearch/bleve/index/scorch"
 	"github.com/blevesearch/bleve/mapping"
+	_ "github.com/sunvim/bleve-sego"
 )
 
 const (
@@ -28,6 +29,10 @@ const (
 	// MaxSearchHitSize the max search record in results
 	MaxSearchHitSize = 10000
 	maxShardCount    = 9999
+)
+
+var (
+	SegoDictPath = "lib/sego_dictionary.txt"
 )
 
 // DocID is a string, with the following configuration. It's 32-characters long, encoding 2
@@ -522,11 +527,33 @@ func buildIndexMapping() (*mapping.IndexMappingImpl, error) {
 	if err != nil {
 		return nil, err
 	}
-	indexMapping.DefaultAnalyzer = "ekanite"
+
+	err = indexMapping.AddCustomTokenizer("sego",
+		map[string]interface{}{
+			"dictpath": SegoDictPath,
+			"type":     "sego",
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	err = indexMapping.AddCustomAnalyzer("sego",
+		map[string]interface{}{
+			"type":          "sego",
+			"char_filters":  []interface{}{},
+			"tokenizer":     "sego",
+			"token_filters": []interface{}{`to_lower`},
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	indexMapping.DefaultAnalyzer = "sego"
 
 	// Create field-specific mappings.
 
 	messageIndexed := bleve.NewTextFieldMapping()
+	messageIndexed.Analyzer = "sego"
 	messageIndexed.Store = true
 	messageIndexed.IncludeInAll = true // XXX Move to false when using AST
 	messageIndexed.IncludeTermVectors = false
