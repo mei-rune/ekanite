@@ -18,7 +18,9 @@ import (
 
 // 一些常量
 const (
-	OpPhrase       = "Phrase"
+	OpMatch  = "Match"
+	OpPhrase = "Phrase"
+	// OpMultiPhrase  = "MultiPhrase"
 	OpPrefix       = "Prefix"
 	OpRegexp       = "Regexp"
 	OpTerm         = "Term"
@@ -38,7 +40,9 @@ var (
 
 // OpList 一些过滤表达式的匹配操作
 var OpList = []string{
+	OpMatch,
 	OpPhrase,
+	// OpMultiPhrase,
 	OpPrefix,
 	OpRegexp,
 	OpTerm,
@@ -70,8 +74,17 @@ func ErrBadArguments(msg string) error {
 // ToQuery 转换为 query.Query
 func (f *Filter) ToQuery() (query.Query, error) {
 	switch f.Op {
+	case OpMatch:
+		if f.Values[0] == "" {
+			return nil, ErrBadArguments("query is empty")
+		}
+		q := bleve.NewMatchQuery(f.Values[0])
+		q.SetField(f.Field)
+		return q, nil
 	case OpPhrase:
 		return bleve.NewPhraseQuery(f.Values, f.Field), nil
+	// case OpMultiPhrase:
+	// 	return bleve.NewMultiPhraseQuery(f.Values, f.Field), nil
 	case OpPrefix:
 		if f.Values[0] == "" {
 			return nil, ErrBadArguments("prefixQuery is empty")
