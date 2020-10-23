@@ -89,6 +89,11 @@ func GroupBy(seacher Searcher, ctx context.Context, startAt, endAt time.Time, q 
 		termQuery.SetField(field)
 
 		searchRequest := bleve.NewSearchRequest(bleve.NewConjunctionQuery(q, termQuery))
+
+		// bs, _ := json.Marshal(searchRequest)
+		// fmt.Println("2================================")
+		// fmt.Println("1parsed request %s", string(bs))
+
 		err := seacher.Query(ctx, startAt, endAt, searchRequest,
 			func(req *bleve.SearchRequest, resp *bleve.SearchResult) error {
 				stats[entry.Term] = resp.Total
@@ -111,8 +116,9 @@ func GroupByNumeric(seacher Searcher, ctx context.Context, startAt, endAt time.T
 	searchRequest := bleve.NewSearchRequest(q)
 	searchRequest.AddFacet(field, facetRequest)
 
-	//bs, _ := json.Marshal(searchRequest)
-	//s.Logger.Printf("parsed request %s", string(bs))
+	// bs, _ := json.Marshal(searchRequest)
+	// fmt.Println("2================================")
+	// fmt.Println("2parsed request %s", string(bs))
 
 	// validate the query
 	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {
@@ -167,8 +173,8 @@ func GroupByTime(seacher Searcher, ctx context.Context, startAt, endAt time.Time
 	searchRequest := bleve.NewSearchRequest(q)
 	searchRequest.AddFacet(field, facetRequest)
 
-	//bs, _ := json.Marshal(searchRequest)
-	//s.Logger.Printf("parsed request %s", string(bs))
+	// bs, _ := json.Marshal(searchRequest)
+	// fmt.Println("parsed request %s", string(bs))
 
 	// validate the query
 	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {

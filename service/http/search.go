@@ -52,6 +52,22 @@ func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name
 		}
 
 		q = bleve.NewConjunctionQuery(queries...)
+	} else {
+		var qu service.Query
+		if err := decodeJSON(req, &qu); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		queries, err := qu.ToQueries()
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Bucket: " + err.Error()))
+			return
+		}
+
+		q = bleve.NewConjunctionQuery(queries...)
 	}
 
 	queryParams := req.URL.Query()
@@ -193,6 +209,10 @@ func (s *Server) groupBy(w http.ResponseWriter, req *http.Request, q query.Query
 	} else {
 		q = bleve.NewConjunctionQuery(q, timeQuery)
 	}
+
+	// fmt.Println("=@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+	// bs, _ := json.Marshal(q)
+	// fmt.Println(string(bs))
 
 	ss := strings.Fields(groupBy)
 	switch len(ss) {

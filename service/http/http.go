@@ -449,12 +449,12 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 	// if allFields {
 	// 	searchRequest.Fields = []string{"*"}
 	// }
-	bs, err := json.Marshal(searchRequest)
-	if err != nil {
-		s.Logger.Printf("parsed request: %s", err)
-	} else {
-		s.Logger.Printf("parsed request: %s", string(bs))
-	}
+	// bs, err := json.Marshal(searchRequest)
+	// if err != nil {
+	// 	s.Logger.Printf("parsed request: %s", err)
+	// } else {
+	// 	s.Logger.Printf("parsed request: %s", string(bs))
+	// }
 
 	// validate the query
 	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {
@@ -466,7 +466,7 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 	}
 
 	// execute the query
-	err = s.Searcher.Query(req.Context(), start, end, searchRequest, cb)
+	err := s.Searcher.Query(req.Context(), start, end, searchRequest, cb)
 	if err != nil {
 		if err == bleve.ErrorAliasEmpty {
 			http.Error(w, fmt.Sprintf("error executing query: %v", err), http.StatusNoContent)
