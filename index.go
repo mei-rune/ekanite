@@ -20,7 +20,7 @@ import (
 	"github.com/blevesearch/bleve/analysis/tokenizer/regexp"
 	"github.com/blevesearch/bleve/index/scorch"
 	"github.com/blevesearch/bleve/mapping"
-	_ "github.com/sunvim/bleve-sego"
+	_ "github.com/ekanite/ekanite/sego"
 )
 
 const (

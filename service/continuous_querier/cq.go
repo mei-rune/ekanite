@@ -79,6 +79,7 @@ func (s *Service) runContinuousQueries(startAt, endAt time.Time) {
 	var qList []service.Query
 	s.metaStore.ForEach(func(id string, q service.Query) {
 		if len(q.ContinuousQueries) == 0 {
+			s.Logger.Println("continuous query(id=" + id + ") skipped")
 			return
 		}
 
@@ -88,6 +89,8 @@ func (s *Service) runContinuousQueries(startAt, endAt time.Time) {
 
 	for idx, key := range keys {
 		s.runQuery(context.Background(), startAt, endAt, key, &qList[idx])
+
+		s.Logger.Println("run continuous queries of query(id=" + key + ") completed")
 	}
 }
 
@@ -114,7 +117,6 @@ func (s *Service) runQuery(ctx context.Context, startTime, endTime time.Time, id
 	}
 
 	for key, cq := range qu.ContinuousQueries {
-
 		cb, err := s.createCallBack(&cq)
 		if err != nil {
 			s.Logger.Println("load callbacks of cq(query="+id+", id="+key+") fail,", err)
