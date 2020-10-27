@@ -582,7 +582,7 @@ func buildIndexMapping() (*mapping.IndexMappingImpl, error) {
 
 	severityIndexed := bleve.NewNumericFieldMapping()
 
-	facilityIndexed := bleve.NewNumericFieldMapping()
+	facilityIndexed := bleve.NewTextFieldMapping()
 
 	articleMapping := bleve.NewDocumentMapping()
 
