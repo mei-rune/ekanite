@@ -52,7 +52,7 @@ func (s *Server) SummaryByFilters(w http.ResponseWriter, req *http.Request, name
 		}
 
 		q = bleve.NewConjunctionQuery(queries...)
-	} else {
+	} else if req.Method != "GET" {
 		var qu service.Query
 		if err := decodeJSON(req, &qu); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
