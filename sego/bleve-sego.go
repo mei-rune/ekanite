@@ -2,12 +2,16 @@ package bleve_sego
 
 import (
 	"errors"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/blevesearch/bleve/analysis"
 	"github.com/blevesearch/bleve/registry"
 	"github.com/huichen/sego"
 )
+
+var RootDir string
 
 func init() {
 	registry.RegisterAnalyzer("sego", analyzerConstructor)
@@ -19,6 +23,9 @@ type SegoTokenizer struct {
 }
 
 func (s *SegoTokenizer) loadDictory(dict string) {
+	if RootDir != "" && !filepath.IsAbs(dict) {
+		dict = filepath.Join(RootDir, dict)
+	}
 	s.tker.LoadDictionary(dict)
 }
 
@@ -49,6 +56,28 @@ func tokenizerConstructor(config map[string]interface{}, cache *registry.Cache) 
 	if !ok {
 		return nil, errors.New("config dictpath not found")
 	}
+
+	dictpath = filepath.ToSlash(dictpath)
+
+	if strings.HasPrefix(dictpath, "D:/609_monitorsoft/") {
+		dictpath = strings.TrimPrefix(dictpath, "D:/609_monitorsoft/")
+	}
+	if strings.HasPrefix(dictpath, "C:/Program Files/hengwei/") {
+		dictpath = strings.TrimPrefix(dictpath, "C:/Program Files/hengwei/")
+	}
+	if strings.HasPrefix(dictpath, "D:/Program Files/hengwei/") {
+		dictpath = strings.TrimPrefix(dictpath, "D:/Program Files/hengwei/")
+	}
+	if strings.HasPrefix(dictpath, "d:/Program Files/hengwei/") {
+		dictpath = strings.TrimPrefix(dictpath, "d:/Program Files/hengwei/")
+	}
+	if strings.HasPrefix(dictpath, "D:/hengwei/") {
+		dictpath = strings.TrimPrefix(dictpath, "D:/hengwei/")
+	}
+	if strings.HasPrefix(dictpath, "d:/hengwei/") {
+		dictpath = strings.TrimPrefix(dictpath, "d:/hengwei/")
+	}
+
 	tokenizerLock.Lock()
 	defer tokenizerLock.Unlock()
 	if old := tokenizerCache[dictpath]; old != nil {

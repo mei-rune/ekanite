@@ -20,7 +20,7 @@ import (
 	"github.com/blevesearch/bleve/analysis/tokenizer/regexp"
 	"github.com/blevesearch/bleve/index/scorch"
 	"github.com/blevesearch/bleve/mapping"
-	_ "github.com/ekanite/ekanite/sego"
+	bleve_sego "github.com/ekanite/ekanite/sego"
 )
 
 const (
@@ -29,11 +29,13 @@ const (
 	// MaxSearchHitSize the max search record in results
 	MaxSearchHitSize = 10000
 	maxShardCount    = 9999
-)
 
-var (
 	SegoDictPath = "lib/sego_dictionary.txt"
 )
+
+func SetSegoRootDir(dir string) {
+	bleve_sego.RootDir = dir
+}
 
 // DocID is a string, with the following configuration. It's 32-characters long, encoding 2
 // 64-bit unsigned integers. When sorting DocIDs, the first 16 characters, reading from the
