@@ -19,14 +19,14 @@ type resourceSemaphore struct {
 	isClosed  bool
 	resources []*resource
 	mu        sync.Mutex
-	cond      sync.Cond
+	cond      chan struct{}
 }
 
 func (rs *resourceSemaphore) init(size int) {
 	if size == 0 {
 		panic("size is zero")
 	}
-	rs.cond.L = &rs.mu
+	rs.cond = make(chan struct{})
 	rs.resources = make([]*resource, size)
 	for idx := range rs.resources {
 		rs.resources[idx] = new(resource)
@@ -42,7 +42,7 @@ func (rs *resourceSemaphore) Close() error {
 	}
 	rs.isClosed = true
 
-	rs.cond.Broadcast()
+	close(rs.cond)
 
 	for _, idx := range rs.resources {
 		if idx.refCounter == 0 && idx.index != nil {
@@ -62,7 +62,12 @@ var ErrNotFound = errors.New("not found")
 
 func (rs *resourceSemaphore) TryAcquire(ctx context.Context, id int, donotWait bool) (*resource, error) {
 	rs.mu.Lock()
-	defer rs.mu.Unlock()
+	isLocked := true
+	defer func() {
+		if isLocked {
+			rs.mu.Unlock()
+		}
+	}()
 
 	if len(rs.resources) == 0 {
 		panic("resources is empty")
@@ -79,8 +84,6 @@ func (rs *resourceSemaphore) TryAcquire(ctx context.Context, id int, donotWait b
 		return nil, ErrNotFound
 	}
 
-	c := make(chan struct{}, 1)
-
 	for !rs.isClosed {
 		for _, r := range rs.resources {
 			if r.refCounter == 0 {
@@ -90,16 +93,15 @@ func (rs *resourceSemaphore) TryAcquire(ctx context.Context, id int, donotWait b
 			}
 		}
 
-		go func() {
-			rs.cond.Wait()
-			c <- struct{}{}
-		}()
+		rs.mu.Unlock()
+		isLocked = false
 		select {
 		case <-ctx.Done():
-			rs.cond.Broadcast() // 让 goroutine 可以退出
 			return nil, ctx.Err()
-		case <-c:
+		case <-rs.cond:
 		}
+		rs.mu.Lock()
+		isLocked = true
 	}
 	return nil, errors.New("pool is closed")
 }
@@ -116,6 +118,8 @@ func (rs *resourceSemaphore) Release(r *resource) {
 			}
 			return
 		}
-		rs.cond.Broadcast()
+		select {
+		case rs.cond <- struct{}{}:
+		}
 	}
 }
