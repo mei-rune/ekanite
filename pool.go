@@ -118,8 +118,10 @@ func (rs *resourceSemaphore) Release(r *resource) {
 			}
 			return
 		}
+
 		select {
 		case rs.cond <- struct{}{}:
+		default:
 		}
 	}
 }
