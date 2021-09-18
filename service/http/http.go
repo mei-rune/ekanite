@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"io"
+	"os"
 	"net/http"
 	_ "net/http/pprof"
 	"runtime/debug"
@@ -19,7 +21,7 @@ import (
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/ekanite/ekanite"
-	"github.com/labstack/echo"
+	echo "github.com/labstack/echo/v4"
 )
 
 func isConsumeJSON(r *http.Request) bool {
@@ -44,7 +46,7 @@ func encodeJSON(w http.ResponseWriter, i interface{}) error {
 }
 
 func decodeJSON(req *http.Request, i interface{}) error {
-	decoder := json.NewDecoder(req.Body)
+	decoder := json.NewDecoder(io.TeeReader(req.Body, os.Stderr))
 	return decoder.Decode(i)
 }
 
@@ -99,6 +101,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	fmt.Println("ek================1", r.URL.Path, s.urlPrefix)
 	if !strings.HasPrefix(r.URL.Path, s.urlPrefix) {
 		if s.NoRoute == nil {
 			http.DefaultServeMux.ServeHTTP(w, r)
@@ -110,6 +113,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	basePath := strings.TrimPrefix(r.URL.Path, s.urlPrefix)
 	name, pa := SplitURLPath(basePath)
+
+	fmt.Println("ek================2", name, pa)
 	switch name {
 	case "debug":
 		r.URL.Path = basePath
@@ -126,11 +131,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch pa {
 		case "", "/":
 			if r.Method == "POST" {
+	fmt.Println("ek================3")
 				s.SearchByFiltersInBody(w, r)
 				return
 			}
 		case "/count", "/count/":
 			if r.Method == "POST" {
+	fmt.Println("ek================4")
 				s.SummaryByFiltersInBody(w, r)
 				return
 			}
@@ -449,12 +456,12 @@ func (s *Server) SearchIn(w http.ResponseWriter, req *http.Request, searchReques
 	// if allFields {
 	// 	searchRequest.Fields = []string{"*"}
 	// }
-	// bs, err := json.Marshal(searchRequest)
-	// if err != nil {
-	// 	s.Logger.Printf("parsed request: %s", err)
-	// } else {
-	// 	s.Logger.Printf("parsed request: %s", string(bs))
-	// }
+	bs, e := json.Marshal(searchRequest)
+	if e != nil {
+		fmt.Printf("parsed request: %s\r\n", e)
+	} else {
+		fmt.Printf("parsed request: %s\r\n", string(bs))
+	}
 
 	// validate the query
 	if srqv, ok := searchRequest.Query.(query.ValidatableQuery); ok {
